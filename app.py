@@ -204,6 +204,29 @@ else:
     gps_file = st.file_uploader("GPS ログ CSV をアップロード", type=["csv", "txt"], key="gps_csv")
 
     if gps_file:
+        # ── デバッグ：生CSVの列名と先頭3行を表示 ──
+        try:
+            raw_bytes = gps_file.read()
+            for enc in ("utf-8-sig", "utf-8", "shift_jis", "cp932"):
+                try:
+                    raw_text = raw_bytes.decode(enc)
+                    break
+                except Exception:
+                    continue
+            import io as _io
+            raw_df = pd.read_csv(_io.StringIO(raw_text), nrows=3)
+            with st.expander("🔍 デバッグ：生CSV（先頭3行）", expanded=True):
+                st.write("列名:", list(raw_df.columns))
+                st.write("先頭3行:")
+                st.dataframe(raw_df.iloc[:, :6])
+            gps_file.seek(0)
+        except Exception as e:
+            st.warning(f"デバッグ表示エラー: {e}")
+            try:
+                gps_file.seek(0)
+            except Exception:
+                pass
+
         try:
             gps_df = load_gps_csv(gps_file)
             st.session_state.gps_df = gps_df
