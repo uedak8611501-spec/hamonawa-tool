@@ -13,23 +13,8 @@ from streamlit_folium import st_folium
 from ocr_extractor import extract_from_image, validate_and_fill_defaults
 from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments
 from database import init_db, save_operation, list_operations, load_operation, delete_operation
-from make_sheet import build_sheet
 
 init_db()
-
-# ── サイドバー：記録シートダウンロード ──────────────────────
-with st.sidebar:
-    st.markdown("### 📄 手書き記録シート")
-    sheet_hachi = st.number_input("鉢数", min_value=1, max_value=40, value=20, step=1, key="sheet_hachi")
-    xlsx_buf = build_sheet(int(sheet_hachi))
-    st.download_button(
-        label="⬇️ Excelシートをダウンロード",
-        data=xlsx_buf,
-        file_name="操業記録シート.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-    st.caption("A4サイズで印刷してご利用ください")
 
 st.set_page_config(
     page_title="延縄操業データ管理",
