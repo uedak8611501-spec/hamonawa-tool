@@ -50,7 +50,7 @@ def load_gps_csv(file_obj) -> pd.DataFrame:
         else:
             text = content
 
-        df = pd.read_csv(StringIO(text))
+        df = pd.read_csv(StringIO(text), index_col=False)
     except Exception as e:
         raise ValueError(f"CSV読み込みエラー: {e}")
 
