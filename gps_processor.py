@@ -69,31 +69,40 @@ def load_gps_csv(file_obj) -> pd.DataFrame:
         date_col = _detect_column(df, DATE_COLS)
         timeonly_col = _detect_column(df, TIMEONLY_COLS)
         if date_col and timeonly_col:
+            parse_errors = []
 
             def _manual_parse(row):
                 """日付列・時刻列を手動でパース（年2桁対応）"""
                 try:
                     d = str(row[date_col]).strip()
                     t = str(row[timeonly_col]).strip()
-                    # 日付を / または - で分割
                     sep = "/" if "/" in d else "-"
-                    dp = d.split(sep)
-                    y = int(dp[0])
+                    parts_d = d.split(sep)
+                    y = int(parts_d[0])
                     if y < 100:
                         y += 2000
-                    mo = int(dp[1])
-                    dy = int(dp[2])
-                    # 時刻を : で分割
-                    tp = t.split(":")
-                    h  = int(tp[0])
-                    mi = int(tp[1])
-                    sc = int(tp[2]) if len(tp) > 2 else 0
+                    mo = int(parts_d[1])
+                    dy = int(parts_d[2])
+                    parts_t = t.split(":")
+                    h  = int(parts_t[0])
+                    mi = int(parts_t[1])
+                    sc = int(parts_t[2]) if len(parts_t) > 2 else 0
                     return datetime(y, mo, dy, h, mi, sc)
-                except Exception:
+                except Exception as e:
+                    parse_errors.append(
+                        f"d={row.get(date_col)!r} t={row.get(timeonly_col)!r} → {e}"
+                    )
                     return pd.NaT
 
             df["timestamp"] = df.apply(_manual_parse, axis=1)
             time_col = "timestamp_created"
+
+            # パース失敗がある場合はエラー内容を例外で報告
+            valid = df["timestamp"].notna().sum()
+            if valid == 0 and parse_errors:
+                raise ValueError(
+                    f"日時パース失敗（全{len(df)}行）。最初のエラー: {parse_errors[0]}"
+                )
         else:
             missing.append("日時(timestamp)")
 
