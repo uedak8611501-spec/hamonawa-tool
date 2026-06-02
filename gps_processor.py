@@ -69,16 +69,30 @@ def load_gps_csv(file_obj) -> pd.DataFrame:
         date_col = _detect_column(df, DATE_COLS)
         timeonly_col = _detect_column(df, TIMEONLY_COLS)
         if date_col and timeonly_col:
-            combined = df[date_col].astype(str).str.strip() + " " + df[timeonly_col].astype(str).str.strip()
 
-            def _parse_dt(s):
+            def _manual_parse(row):
+                """日付列・時刻列を手動でパース（年2桁対応）"""
                 try:
-                    # yearfirst=True で "26/06/01" → 2026-06-01 と解釈
-                    return dateutil_parser.parse(s, yearfirst=True, dayfirst=False)
+                    d = str(row[date_col]).strip()
+                    t = str(row[timeonly_col]).strip()
+                    # 日付を / または - で分割
+                    sep = "/" if "/" in d else "-"
+                    dp = d.split(sep)
+                    y = int(dp[0])
+                    if y < 100:
+                        y += 2000
+                    mo = int(dp[1])
+                    dy = int(dp[2])
+                    # 時刻を : で分割
+                    tp = t.split(":")
+                    h  = int(tp[0])
+                    mi = int(tp[1])
+                    sc = int(tp[2]) if len(tp) > 2 else 0
+                    return datetime(y, mo, dy, h, mi, sc)
                 except Exception:
                     return pd.NaT
 
-            df["timestamp"] = combined.apply(_parse_dt)
+            df["timestamp"] = df.apply(_manual_parse, axis=1)
             time_col = "timestamp_created"
         else:
             missing.append("日時(timestamp)")
