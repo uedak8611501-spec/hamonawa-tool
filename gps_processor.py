@@ -6,6 +6,7 @@ from datetime import datetime, date
 from io import StringIO
 
 import pandas as pd
+from dateutil import parser as dateutil_parser
 
 
 # よく使われるGPS CSVの列名パターン（自動検出用）
@@ -69,14 +70,15 @@ def load_gps_csv(file_obj) -> pd.DataFrame:
         timeonly_col = _detect_column(df, TIMEONLY_COLS)
         if date_col and timeonly_col:
             combined = df[date_col].astype(str).str.strip() + " " + df[timeonly_col].astype(str).str.strip()
-            # 年2桁（例:26/06/01）→ %y、年4桁 → %Y の順で試みる
-            parsed = None
-            for fmt in ["%y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
-                        "%y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"]:
-                parsed = pd.to_datetime(combined, format=fmt, errors="coerce")
-                if parsed.notna().sum() > 0:
-                    break
-            df["timestamp"] = parsed
+
+            def _parse_dt(s):
+                try:
+                    # yearfirst=True で "26/06/01" → 2026-06-01 と解釈
+                    return dateutil_parser.parse(s, yearfirst=True, dayfirst=False)
+                except Exception:
+                    return pd.NaT
+
+            df["timestamp"] = combined.apply(_parse_dt)
             time_col = "timestamp_created"
         else:
             missing.append("日時(timestamp)")
