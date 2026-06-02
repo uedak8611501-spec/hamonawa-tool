@@ -11,9 +11,10 @@ import pandas as pd
 # よく使われるGPS CSVの列名パターン（自動検出用）
 LAT_COLS = ["latitude", "lat", "緯度", "Lat", "Latitude"]
 LON_COLS = ["longitude", "lon", "lng", "経度", "Lon", "Longitude"]
-TIME_COLS = ["timestamp", "datetime", "time", "日時", "時刻", "DateTime", "Time"]
+# 「時刻」は時刻のみ列なのでTIME_COLSから除外
+TIME_COLS = ["timestamp", "datetime", "日時", "DateTime"]
 DATE_COLS = ["date", "日付", "Date"]
-TIMEONLY_COLS = ["time", "時刻", "Time"]
+TIMEONLY_COLS = ["時刻", "time", "Time"]
 
 
 def _detect_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
