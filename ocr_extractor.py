@@ -15,6 +15,7 @@ EXTRACTION_PROMPT = """
 抽出項目:
 {
   "date": "YYYY-MM-DD形式の日付",
+  "location": "操業場所・漁場名",
   "bait": "エサの種類",
   "start_time": "HH:MM形式の投入開始時刻",
   "end_time": "HH:MM形式の投入終了時刻",

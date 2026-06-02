@@ -22,9 +22,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS operations (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             op_date     TEXT NOT NULL,          -- 操業日 YYYY-MM-DD
+            location    TEXT,                   -- 操業場所
             bait        TEXT,                   -- エサ
             start_time  TEXT,                   -- 投入開始 HH:MM
-            end_time    TEXT,                   -- 揚げ終了 HH:MM
+            end_time    TEXT,                   -- 投入終了 HH:MM
             total_hachi INTEGER,                -- 総鉢数
             total_catch INTEGER,                -- 総釣果
             surface_temp    REAL,
@@ -64,13 +65,14 @@ def save_operation(ocr_data: dict, segments: list[dict]) -> int:
         cur = conn.execute(
             """
             INSERT INTO operations
-              (op_date, bait, start_time, end_time, total_hachi, total_catch,
+              (op_date, location, bait, start_time, end_time, total_hachi, total_catch,
                surface_temp, bottom_temp, surface_salinity, bottom_salinity,
                max_depth, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 ocr_data.get("date"),
+                ocr_data.get("location"),
                 ocr_data.get("bait"),
                 ocr_data.get("start_time"),
                 ocr_data.get("end_time"),
@@ -143,6 +145,7 @@ def load_operation(op_id: int) -> tuple[dict, list[dict]]:
     # ocr_data形式に変換
     ocr_data = {
         "date":        op["op_date"],
+        "location":    op["location"],
         "bait":        op["bait"],
         "start_time":  op["start_time"],
         "end_time":    op["end_time"],

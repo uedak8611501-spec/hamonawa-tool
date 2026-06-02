@@ -98,6 +98,7 @@ with col_ocr:
                 except ValueError:
                     pass
             op_date = st.date_input("操業日", value=default_date)
+            location = st.text_input("場所", value=d.get("location") or "")
             bait = st.text_input("エサ", value=d.get("bait") or "")
 
         with fc2:
@@ -167,6 +168,7 @@ with col_ocr:
 
         st.session_state.ocr_data = {
             "date": op_date.strftime("%Y-%m-%d"),
+            "location": location,
             "bait": bait,
             "start_time": start_time.strftime("%H:%M"),
             "end_time": end_time.strftime("%H:%M"),
@@ -459,6 +461,7 @@ else:
     df_ops = pd.DataFrame([{
         "ID":       o["id"],
         "操業日":   o["op_date"],
+        "場所":     o["location"] or "—",
         "エサ":     o["bait"] or "—",
         "鉢数":     o["total_hachi"],
         "総釣果":   o["total_catch"],
