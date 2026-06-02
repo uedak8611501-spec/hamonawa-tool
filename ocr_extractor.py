@@ -17,7 +17,7 @@ EXTRACTION_PROMPT = """
   "date": "YYYY-MM-DD形式の日付",
   "bait": "エサの種類",
   "start_time": "HH:MM形式の投入開始時刻",
-  "end_time": "HH:MM形式の揚げ終了時刻",
+  "end_time": "HH:MM形式の投入終了時刻",
   "total_hachi": 総鉢数（整数）,
   "catch_per_hachi": [
     {"hachi": 1, "count": 12},

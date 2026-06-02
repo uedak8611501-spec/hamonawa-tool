@@ -102,7 +102,7 @@ with col_ocr:
 
         with fc2:
             start_time = st.time_input("投入開始時刻", value=_parse_time(d.get("start_time")), step=60)
-            end_time = st.time_input("揚げ終了時刻", value=_parse_time(d.get("end_time")), step=60)
+            end_time = st.time_input("投入終了時刻", value=_parse_time(d.get("end_time")), step=60)
 
         st.markdown("---")
         st.markdown("**CTD環境データ**")
