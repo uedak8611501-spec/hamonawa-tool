@@ -68,17 +68,15 @@ def load_gps_csv(file_obj) -> pd.DataFrame:
         date_col = _detect_column(df, DATE_COLS)
         timeonly_col = _detect_column(df, TIMEONLY_COLS)
         if date_col and timeonly_col:
-            # 年2桁対応: "26/06/01" → "2026/06/01"
-            def fix_year(d):
-                parts = str(d).split("/")
-                if len(parts) == 3 and len(parts[0]) == 2:
-                    return "20" + "/".join(parts)
-                return d
-            df["timestamp"] = pd.to_datetime(
-                df[date_col].apply(fix_year).astype(str) + " " + df[timeonly_col].astype(str),
-                format="%Y/%m/%d %H:%M:%S",
-                errors="coerce"
-            )
+            combined = df[date_col].astype(str).str.strip() + " " + df[timeonly_col].astype(str).str.strip()
+            # 年2桁（例:26/06/01）→ %y、年4桁 → %Y の順で試みる
+            parsed = None
+            for fmt in ["%y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
+                        "%y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"]:
+                parsed = pd.to_datetime(combined, format=fmt, errors="coerce")
+                if parsed.notna().sum() > 0:
+                    break
+            df["timestamp"] = parsed
             time_col = "timestamp_created"
         else:
             missing.append("日時(timestamp)")
