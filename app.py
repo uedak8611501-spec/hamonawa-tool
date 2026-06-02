@@ -12,6 +12,9 @@ from streamlit_folium import st_folium
 
 from ocr_extractor import extract_from_image, validate_and_fill_defaults
 from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments
+from database import init_db, save_operation, list_operations, load_operation, delete_operation
+
+init_db()
 
 st.set_page_config(
     page_title="延縄操業データ管理",
@@ -415,3 +418,77 @@ else:
     # ── 地図を表示 ────────────────────────────────────────
     st.caption("線をクリックすると水温・塩分・水深が表示されます")
     st_folium(m, use_container_width=True, height=550, returned_objects=[])
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# STEP 4: データ保存 & 過去の操業履歴
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+st.header("STEP 4 　データを保存する・過去の操業を見る")
+
+# ── 今日のデータを保存 ───────────────────────────────────
+if st.session_state.segments and st.session_state.ocr_data:
+    od = st.session_state.ocr_data
+    st.subheader("💾 今日の操業データを保存")
+    st.info(
+        f"📅 {od.get('date')}　"
+        f"🐟 総釣果: {sum(x['count'] for x in od.get('catch_per_hachi',[]))} 匹 / "
+        f"{od.get('total_hachi')} 鉢"
+    )
+
+    if st.button("📥 このデータをDBに保存する", type="primary"):
+        try:
+            op_id = save_operation(od, st.session_state.segments)
+            st.success(f"✅ 保存しました！（操業ID: {op_id}）")
+            st.rerun()
+        except Exception as e:
+            st.error(f"保存エラー: {e}")
+else:
+    st.info("STEP 1〜3 を完了すると、ここからデータを保存できます。")
+
+st.markdown("---")
+
+# ── 過去の操業履歴 ───────────────────────────────────────
+st.subheader("📋 過去の操業履歴")
+
+ops = list_operations()
+
+if not ops:
+    st.write("まだデータが保存されていません。")
+else:
+    # 一覧テーブル
+    df_ops = pd.DataFrame([{
+        "ID":       o["id"],
+        "操業日":   o["op_date"],
+        "エサ":     o["bait"] or "—",
+        "鉢数":     o["total_hachi"],
+        "総釣果":   o["total_catch"],
+        "開始":     o["start_time"],
+        "終了":     o["end_time"],
+        "表層水温": f"{o['surface_temp']}℃" if o["surface_temp"] else "—",
+        "底水温":   f"{o['bottom_temp']}℃"  if o["bottom_temp"]  else "—",
+    } for o in ops])
+    st.dataframe(df_ops, use_container_width=True, hide_index=True)
+
+    # 読み込みと削除
+    col_load, col_del = st.columns([2, 1])
+    with col_load:
+        selected_id = st.selectbox(
+            "操業を選んで地図で見る",
+            options=[o["id"] for o in ops],
+            format_func=lambda i: next(
+                f"{o['op_date']} ({o['total_catch']}匹/{o['total_hachi']}鉢)"
+                for o in ops if o["id"] == i
+            ),
+        )
+        if st.button("🗺️ 選択した操業を読み込む"):
+            loaded_ocr, loaded_segs = load_operation(selected_id)
+            st.session_state.ocr_data  = loaded_ocr
+            st.session_state.segments  = loaded_segs
+            st.success("読み込みました！STEP 3 の地図が更新されます。")
+            st.rerun()
+
+    with col_del:
+        if st.button("🗑️ 選択した操業を削除", type="secondary"):
+            delete_operation(selected_id)
+            st.warning("削除しました。")
+            st.rerun()
