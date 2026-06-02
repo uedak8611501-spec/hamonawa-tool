@@ -94,8 +94,8 @@ with col_ocr:
                 except ValueError:
                     return time(6, 0)
 
-            start_time = st.time_input("投入開始時刻", value=_parse_time(d.get("start_time")))
-            end_time = st.time_input("揚げ終了時刻", value=_parse_time(d.get("end_time")))
+            start_time = st.time_input("投入開始時刻", value=_parse_time(d.get("start_time")), step=60)
+            end_time = st.time_input("揚げ終了時刻", value=_parse_time(d.get("end_time")), step=60)
 
         total_hachi = st.number_input(
             "総鉢数", min_value=1, max_value=500,
