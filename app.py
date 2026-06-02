@@ -7,6 +7,8 @@ from datetime import datetime, date, time
 
 import streamlit as st
 import pandas as pd
+import folium
+from streamlit_folium import st_folium
 
 from ocr_extractor import extract_from_image, validate_and_fill_defaults
 from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments
@@ -295,4 +297,121 @@ else:
             file_name=f"operation_{od['date']}.json",
             mime="application/json",
         )
-        st.info("🗺️ 地図可視化（STEP 3: Foliumヒートマップ）は次のフェーズで実装します。")
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# STEP 3: 地図可視化（Foliumヒートマップ）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+st.header("STEP 3 　地図で見る（釣果ヒートマップ）")
+
+if not st.session_state.segments:
+    st.warning("先にSTEP 2でGPSを分割してください。")
+else:
+    segs = st.session_state.segments
+    od   = st.session_state.ocr_data
+    ctd  = od.get("ctd", {}) or {}
+
+    # ── 釣果に応じた色を計算 ──────────────────────────────
+    max_catch = max((s["catch"] for s in segs), default=1) or 1
+
+    def _catch_color(catch):
+        """釣果0=青、最大=赤 のグラデーション"""
+        ratio = catch / max_catch
+        r = int(255 * ratio)
+        b = int(255 * (1 - ratio))
+        return f"#{r:02x}00{b:02x}"
+
+    def _catch_weight(catch):
+        """釣果が多いほど線を太く（3〜10px）"""
+        return 3 + int(7 * (catch / max_catch))
+
+    # ── 地図の中心 ────────────────────────────────────────
+    all_lats = [s["center_lat"] for s in segs]
+    all_lons = [s["center_lon"] for s in segs]
+    center   = [sum(all_lats) / len(all_lats), sum(all_lons) / len(all_lons)]
+
+    # ── Folium地図を作成 ──────────────────────────────────
+    m = folium.Map(location=center, zoom_start=13, control_scale=True)
+
+    # ベースマップ切替
+    folium.TileLayer("OpenStreetMap",   name="標準地図").add_to(m)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri", name="衛星写真", overlay=False
+    ).add_to(m)
+    folium.TileLayer(
+        tiles="https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
+        attr="OpenSeaMap", name="海図レイヤー", overlay=True
+    ).add_to(m)
+
+    # ── 各鉢を線 + ポップアップで描画 ────────────────────
+    for seg in segs:
+        pts = seg["points"]
+        coords = list(zip(pts["lat"].tolist(), pts["lon"].tolist()))
+        if len(coords) < 2:
+            continue
+
+        color  = _catch_color(seg["catch"])
+        weight = _catch_weight(seg["catch"])
+
+        # ポップアップHTML
+        st_temp  = ctd.get("surface_temp")
+        bt_temp  = ctd.get("bottom_temp")
+        st_sal   = ctd.get("surface_salinity")
+        bt_sal   = ctd.get("bottom_salinity")
+        depth    = ctd.get("max_depth")
+        temp_diff = round(st_temp - bt_temp, 1) if st_temp and bt_temp else "N/A"
+
+        popup_html = f"""
+        <div style="font-family:sans-serif; min-width:200px;">
+          <h4 style="margin:4px 0; color:{color};">第{seg['hachi_no']}鉢</h4>
+          <hr style="margin:4px 0;">
+          <b>🐟 釣果：</b>{seg['catch']} 匹<br>
+          <b>📏 区間距離：</b>{round(seg['length_m'])} m<br>
+          <b>⏱ 時刻：</b>{seg['start_time'].strftime('%H:%M')}〜{seg['end_time'].strftime('%H:%M')}<br>
+          <hr style="margin:4px 0;">
+          <b>🌡 水温：</b>表層 {st_temp}℃ / 底 {bt_temp}℃（差 {temp_diff}℃）<br>
+          <b>🧂 塩分：</b>表層 {st_sal} psu / 底 {bt_sal} psu<br>
+          <b>🌊 水深：</b>{depth} m<br>
+        </div>
+        """
+
+        folium.PolyLine(
+            locations=coords,
+            color=color,
+            weight=weight,
+            opacity=0.85,
+            tooltip=f"第{seg['hachi_no']}鉢：{seg['catch']}匹",
+            popup=folium.Popup(popup_html, max_width=280),
+        ).add_to(m)
+
+        # 区間の中心にマーカー
+        folium.CircleMarker(
+            location=[seg["center_lat"], seg["center_lon"]],
+            radius=8,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.9,
+            tooltip=f"第{seg['hachi_no']}鉢",
+            popup=folium.Popup(popup_html, max_width=280),
+        ).add_to(m)
+
+    folium.LayerControl(collapsed=False).add_to(m)
+
+    # ── 凡例 ─────────────────────────────────────────────
+    legend_html = f"""
+    <div style="position:fixed; bottom:30px; left:30px; z-index:1000;
+                background:white; padding:10px; border-radius:8px;
+                border:1px solid #ccc; font-family:sans-serif; font-size:13px;">
+      <b>釣果の凡例</b><br>
+      <span style="color:#0000ff;">●</span> 0匹（少）<br>
+      <span style="color:#7f007f;">●</span> 中間<br>
+      <span style="color:#ff0000;">●</span> {max_catch}匹（最多）<br>
+      <small>線の太さ・色が釣果に比例</small>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+    # ── 地図を表示 ────────────────────────────────────────
+    st.caption("線をクリックすると水温・塩分・水深が表示されます")
+    st_folium(m, use_container_width=True, height=550, returned_objects=[])
