@@ -12,6 +12,8 @@ import pandas as pd
 LAT_COLS = ["latitude", "lat", "緯度", "Lat", "Latitude"]
 LON_COLS = ["longitude", "lon", "lng", "経度", "Lon", "Longitude"]
 TIME_COLS = ["timestamp", "datetime", "time", "日時", "時刻", "DateTime", "Time"]
+DATE_COLS = ["date", "日付", "Date"]
+TIMEONLY_COLS = ["time", "時刻", "Time"]
 
 
 def _detect_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
@@ -59,13 +61,36 @@ def load_gps_csv(file_obj) -> pd.DataFrame:
         missing.append("緯度(latitude)")
     if lon_col is None:
         missing.append("経度(longitude)")
+
+    # 日付と時刻が別列の場合（GPS2CSV形式）に対応
     if time_col is None:
-        missing.append("日時(timestamp)")
+        date_col = _detect_column(df, DATE_COLS)
+        timeonly_col = _detect_column(df, TIMEONLY_COLS)
+        if date_col and timeonly_col:
+            # 年2桁対応: "26/06/01" → "2026/06/01"
+            def fix_year(d):
+                parts = str(d).split("/")
+                if len(parts) == 3 and len(parts[0]) == 2:
+                    return "20" + "/".join(parts)
+                return d
+            df["timestamp"] = pd.to_datetime(
+                df[date_col].apply(fix_year).astype(str) + " " + df[timeonly_col].astype(str),
+                format="%Y/%m/%d %H:%M:%S",
+                errors="coerce"
+            )
+            time_col = "timestamp_created"
+        else:
+            missing.append("日時(timestamp)")
+
     if missing:
         raise ValueError(f"必要な列が見つかりません: {', '.join(missing)}\n検出された列: {list(df.columns)}")
 
-    df = df.rename(columns={lat_col: "lat", lon_col: "lon", time_col: "timestamp"})
-    df["timestamp"] = pd.to_datetime(df["timestamp"], infer_datetime_format=True)
+    if time_col != "timestamp_created":
+        df = df.rename(columns={time_col: "timestamp"})
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+
+    df = df.rename(columns={lat_col: "lat", lon_col: "lon"})
+    df = df.dropna(subset=["timestamp"])
     df = df.sort_values("timestamp").reset_index(drop=True)
 
     return df[["timestamp", "lat", "lon"] + [c for c in df.columns if c not in ("timestamp", "lat", "lon")]]
