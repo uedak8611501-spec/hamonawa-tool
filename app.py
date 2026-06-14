@@ -37,13 +37,13 @@ if "last_center" not in st.session_state:
     st.session_state.last_center = [33.0, 132.2]  # 初期表示位置（後で実データで上書き）
 
 
-def _parse_time(s):
+def _parse_time(s, default=time(6, 0)):
     if not s:
-        return time(6, 0)
+        return default
     try:
         return datetime.strptime(s, "%H:%M").time()
     except ValueError:
-        return time(6, 0)
+        return default
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -74,8 +74,8 @@ with st.container():
             bait = st.text_input("エサ", value=d.get("bait") or "")
 
         with fc2:
-            start_time = st.time_input("投入開始時刻", value=_parse_time(d.get("start_time")), step=60)
-            end_time = st.time_input("投入終了時刻", value=_parse_time(d.get("end_time")), step=60)
+            start_time = st.time_input("投入開始時刻", value=_parse_time(d.get("start_time"), time(3, 0)), step=60)
+            end_time = st.time_input("投入終了時刻", value=_parse_time(d.get("end_time"), time(4, 0)), step=60)
 
         st.markdown("---")
         st.markdown("**CTD環境データ**")
