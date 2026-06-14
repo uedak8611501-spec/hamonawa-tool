@@ -315,19 +315,32 @@ else:
     od   = st.session_state.ocr_data
     ctd  = od.get("ctd", {}) or {}
 
-    # ── 釣果に応じた色を計算 ──────────────────────────────
-    max_catch = max((s["catch"] for s in segs), default=1) or 1
-
+    # ── 釣果に応じた色を計算（絶対値で5段階に固定）──────────
     def _catch_color(catch):
-        """釣果0=青、最大=赤 のグラデーション"""
-        ratio = catch / max_catch
-        r = int(255 * ratio)
-        b = int(255 * (1 - ratio))
-        return f"#{r:02x}00{b:02x}"
+        """釣果数の絶対値で色を決める（その日の良し悪しに左右されない）"""
+        if catch >= 25:
+            return "#d7191c"  # 赤：最高
+        elif catch >= 20:
+            return "#fd8d3c"  # 橙：高
+        elif catch >= 15:
+            return "#ffd700"  # 黄：良
+        elif catch >= 10:
+            return "#74add1"  # 水色：まあまあ
+        else:
+            return "#2c7bb6"  # 青：ダメ（0〜9匹）
 
     def _catch_weight(catch):
-        """釣果が多いほど線を太く（3〜10px）"""
-        return 3 + int(7 * (catch / max_catch))
+        """釣果の段階が上がるほど線を太く"""
+        if catch >= 25:
+            return 10
+        elif catch >= 20:
+            return 8
+        elif catch >= 15:
+            return 6
+        elif catch >= 10:
+            return 5
+        else:
+            return 3
 
     # ── 地図の中心 ────────────────────────────────────────
     all_lats = [s["center_lat"] for s in segs]
@@ -404,15 +417,16 @@ else:
     folium.LayerControl(collapsed=False).add_to(m)
 
     # ── 凡例 ─────────────────────────────────────────────
-    legend_html = f"""
+    legend_html = """
     <div style="position:fixed; bottom:30px; left:30px; z-index:1000;
                 background:white; padding:10px; border-radius:8px;
                 border:1px solid #ccc; font-family:sans-serif; font-size:13px;">
-      <b>釣果の凡例</b><br>
-      <span style="color:#0000ff;">●</span> 0匹（少）<br>
-      <span style="color:#7f007f;">●</span> 中間<br>
-      <span style="color:#ff0000;">●</span> {max_catch}匹（最多）<br>
-      <small>線の太さ・色が釣果に比例</small>
+      <b>釣果の凡例（匹数で固定）</b><br>
+      <span style="color:#d7191c;">●</span> 25匹以上（最高）<br>
+      <span style="color:#fd8d3c;">●</span> 20〜24匹（高）<br>
+      <span style="color:#ffd700;">●</span> 15〜19匹（良）<br>
+      <span style="color:#74add1;">●</span> 10〜14匹（まあまあ）<br>
+      <span style="color:#2c7bb6;">●</span> 0〜9匹（ダメ）<br>
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
