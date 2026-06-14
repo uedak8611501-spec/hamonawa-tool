@@ -428,8 +428,11 @@ else:
 st.header("STEP 4 　データを保存する・過去の操業を見る")
 
 # ── 今日のデータを保存 ───────────────────────────────────
-if st.session_state.segments and st.session_state.ocr_data:
+# GPS分割（segments）が無くても、STEP 1の操業データだけで保存できる
+if st.session_state.ocr_data and "error" not in st.session_state.ocr_data:
     od = st.session_state.ocr_data
+    has_gps = bool(st.session_state.segments)
+
     st.subheader("💾 今日の操業データを保存")
     st.info(
         f"📅 {od.get('date')}　"
@@ -437,15 +440,22 @@ if st.session_state.segments and st.session_state.ocr_data:
         f"{od.get('total_hachi')} 鉢"
     )
 
+    if not has_gps:
+        st.warning(
+            "⚠️ GPSログがありません（STEP 2未実施）。"
+            "釣果・水温などの記録だけ保存します。地図表示はできませんが、データは残ります。"
+        )
+
     if st.button("📥 このデータをDBに保存する", type="primary"):
         try:
-            op_id = save_operation(od, st.session_state.segments)
+            segs = st.session_state.segments or []
+            op_id = save_operation(od, segs)
             st.success(f"✅ 保存しました！（操業ID: {op_id}）")
             st.rerun()
         except Exception as e:
             st.error(f"保存エラー: {e}")
 else:
-    st.info("STEP 1〜3 を完了すると、ここからデータを保存できます。")
+    st.info("STEP 1 で操業データを確定すると、ここから保存できます（GPSは無くてもOK）。")
 
 st.markdown("---")
 
