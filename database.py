@@ -224,6 +224,27 @@ def load_operation(op_id: int) -> tuple[dict, list[dict]]:
     return ocr_data, segments
 
 
+def load_all_segments() -> list[dict]:
+    """
+    全操業の全セグメントを操業情報付きで返す（重ね地図・集計分析用）。
+    各行に op_date / location / bait / CTD環境データが結合される。
+    """
+    init_db()
+    result = _d1_query("""
+        SELECT
+            s.operation_id, s.hachi_no, s.catch,
+            s.center_lat, s.center_lon, s.length_m, s.gps_points,
+            o.op_date, o.location, o.bait,
+            o.surface_temp, o.bottom_temp,
+            o.surface_salinity, o.bottom_salinity, o.max_depth,
+            o.total_catch, o.total_hachi
+        FROM segments s
+        JOIN operations o ON s.operation_id = o.id
+        ORDER BY o.op_date, s.hachi_no
+    """)
+    return result["results"]
+
+
 def delete_operation(op_id: int):
     """指定IDの操業データを削除する"""
     init_db()

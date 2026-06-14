@@ -12,7 +12,7 @@ from folium.plugins import Draw
 from streamlit_folium import st_folium
 
 from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments, polyline_to_track
-from database import init_db, save_operation, list_operations, load_operation, delete_operation
+from database import init_db, save_operation, list_operations, load_operation, delete_operation, load_all_segments
 
 init_db()
 
@@ -44,6 +44,49 @@ def _parse_time(s, default=time(6, 0)):
         return datetime.strptime(s, "%H:%M").time()
     except ValueError:
         return default
+
+
+# ── 釣果に応じた色・太さ（絶対値で5段階に固定）──────────────
+def catch_color(catch):
+    """釣果数の絶対値で色を決める（その日の良し悪しに左右されない）"""
+    if catch >= 25:
+        return "#d7191c"  # 赤：最高
+    elif catch >= 20:
+        return "#fd8d3c"  # 橙：高
+    elif catch >= 15:
+        return "#ffd700"  # 黄：良
+    elif catch >= 10:
+        return "#74add1"  # 水色：まあまあ
+    else:
+        return "#2c7bb6"  # 青：ダメ（0〜9匹）
+
+
+def catch_weight(catch):
+    """釣果の段階が上がるほど線を太く"""
+    if catch >= 25:
+        return 10
+    elif catch >= 20:
+        return 8
+    elif catch >= 15:
+        return 6
+    elif catch >= 10:
+        return 5
+    else:
+        return 3
+
+
+CATCH_LEGEND_HTML = """
+<div style="position:fixed; bottom:30px; left:30px; z-index:1000;
+            background:white; padding:10px; border-radius:8px;
+            border:1px solid #ccc; font-family:sans-serif; font-size:13px;">
+  <b>釣果の凡例（匹数で固定）</b><br>
+  <span style="color:#d7191c;">●</span> 25匹以上（最高）<br>
+  <span style="color:#fd8d3c;">●</span> 20〜24匹（高）<br>
+  <span style="color:#ffd700;">●</span> 15〜19匹（良）<br>
+  <span style="color:#74add1;">●</span> 10〜14匹（まあまあ）<br>
+  <span style="color:#2c7bb6;">●</span> 0〜9匹（ダメ）<br>
+</div>
+"""
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -349,33 +392,6 @@ else:
     od   = st.session_state.ocr_data
     ctd  = od.get("ctd", {}) or {}
 
-    # ── 釣果に応じた色を計算（絶対値で5段階に固定）──────────
-    def _catch_color(catch):
-        """釣果数の絶対値で色を決める（その日の良し悪しに左右されない）"""
-        if catch >= 25:
-            return "#d7191c"  # 赤：最高
-        elif catch >= 20:
-            return "#fd8d3c"  # 橙：高
-        elif catch >= 15:
-            return "#ffd700"  # 黄：良
-        elif catch >= 10:
-            return "#74add1"  # 水色：まあまあ
-        else:
-            return "#2c7bb6"  # 青：ダメ（0〜9匹）
-
-    def _catch_weight(catch):
-        """釣果の段階が上がるほど線を太く"""
-        if catch >= 25:
-            return 10
-        elif catch >= 20:
-            return 8
-        elif catch >= 15:
-            return 6
-        elif catch >= 10:
-            return 5
-        else:
-            return 3
-
     # ── 地図の中心 ────────────────────────────────────────
     all_lats = [s["center_lat"] for s in segs]
     all_lons = [s["center_lon"] for s in segs]
@@ -403,8 +419,8 @@ else:
         if len(coords) < 2:
             continue
 
-        color  = _catch_color(seg["catch"])
-        weight = _catch_weight(seg["catch"])
+        color  = catch_color(seg["catch"])
+        weight = catch_weight(seg["catch"])
 
         # ポップアップHTML
         st_temp  = ctd.get("surface_temp")
@@ -452,19 +468,7 @@ else:
     folium.LayerControl(collapsed=False).add_to(m)
 
     # ── 凡例 ─────────────────────────────────────────────
-    legend_html = """
-    <div style="position:fixed; bottom:30px; left:30px; z-index:1000;
-                background:white; padding:10px; border-radius:8px;
-                border:1px solid #ccc; font-family:sans-serif; font-size:13px;">
-      <b>釣果の凡例（匹数で固定）</b><br>
-      <span style="color:#d7191c;">●</span> 25匹以上（最高）<br>
-      <span style="color:#fd8d3c;">●</span> 20〜24匹（高）<br>
-      <span style="color:#ffd700;">●</span> 15〜19匹（良）<br>
-      <span style="color:#74add1;">●</span> 10〜14匹（まあまあ）<br>
-      <span style="color:#2c7bb6;">●</span> 0〜9匹（ダメ）<br>
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend_html))
+    m.get_root().html.add_child(folium.Element(CATCH_LEGEND_HTML))
 
     # ── 地図を表示 ────────────────────────────────────────
     st.caption("線をクリックすると水温・塩分・水深が表示されます")
@@ -554,3 +558,77 @@ else:
             delete_operation(selected_id)
             st.warning("削除しました。")
             st.rerun()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# STEP 5: 全操業の重ね地図（鉄板ポイント分析）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+st.header("STEP 5 　全操業の重ね地図（鉄板ポイント分析）")
+
+all_segs = load_all_segments()
+
+if not all_segs:
+    st.info("GPS付きで保存した操業がまだありません。STEP 1〜4で保存すると、ここに重ねて表示されます。")
+else:
+    # ── 日付フィルタ ──
+    all_dates = sorted({s["op_date"] for s in all_segs})
+    sel_dates = st.multiselect(
+        "表示する操業日を選択（未選択なら全部表示）",
+        options=all_dates,
+        default=all_dates,
+    )
+    if not sel_dates:
+        sel_dates = all_dates
+
+    view_segs = [s for s in all_segs if s["op_date"] in sel_dates]
+    st.caption(f"表示中：{len(sel_dates)} 日分 / 合計 {len(view_segs)} 鉢")
+
+    # ── 地図の中心 ──
+    lats = [s["center_lat"] for s in view_segs if s["center_lat"]]
+    lons = [s["center_lon"] for s in view_segs if s["center_lon"]]
+    center = [sum(lats) / len(lats), sum(lons) / len(lons)]
+
+    m5 = folium.Map(location=center, zoom_start=13, control_scale=True)
+    folium.TileLayer("OpenStreetMap", name="標準地図").add_to(m5)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri", name="衛星写真",
+    ).add_to(m5)
+    folium.TileLayer(
+        tiles="https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
+        attr="OpenSeaMap", name="海図レイヤー", overlay=True,
+    ).add_to(m5)
+
+    # ── 全鉢を重ねて描画 ──
+    for s in view_segs:
+        try:
+            gps = json.loads(s["gps_points"]) if s["gps_points"] else []
+        except Exception:
+            gps = []
+        if len(gps) < 2:
+            continue
+        coords = [(p[0], p[1]) for p in gps]
+        color = catch_color(s["catch"])
+        weight = catch_weight(s["catch"])
+
+        popup_html = f"""
+        <div style="font-family:sans-serif; min-width:180px;">
+          <h4 style="margin:4px 0; color:{color};">{s['op_date']} 第{s['hachi_no']}鉢</h4>
+          <hr style="margin:4px 0;">
+          <b>🐟 釣果：</b>{s['catch']} 匹<br>
+          <b>📍 場所：</b>{s['location'] or '—'}<br>
+          <b>🌡 底水温：</b>{s['bottom_temp']}℃<br>
+          <b>🌊 最大水深：</b>{s['max_depth']} m<br>
+        </div>
+        """
+        folium.PolyLine(
+            locations=coords, color=color, weight=weight, opacity=0.75,
+            tooltip=f"{s['op_date']} 第{s['hachi_no']}鉢：{s['catch']}匹",
+            popup=folium.Popup(popup_html, max_width=260),
+        ).add_to(m5)
+
+    folium.LayerControl(collapsed=False).add_to(m5)
+    m5.get_root().html.add_child(folium.Element(CATCH_LEGEND_HTML))
+
+    st.caption("赤い線が重なる場所＝いつもよく釣れる鉄板ポイントです")
+    st_folium(m5, use_container_width=True, height=600, returned_objects=[])
