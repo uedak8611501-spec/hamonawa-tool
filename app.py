@@ -11,7 +11,6 @@ import folium
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
-from ocr_extractor import extract_from_image, validate_and_fill_defaults
 from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments, polyline_to_track
 from database import init_db, save_operation, list_operations, load_operation, delete_operation
 
@@ -48,42 +47,12 @@ def _parse_time(s):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# STEP 1: 操業メモ写真アップロード & OCR
+# STEP 1: 操業データの入力
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-st.header("STEP 1 　操業メモ写真のアップロードとデータ抽出")
+st.header("STEP 1 　操業データの入力")
 
-col_img, col_ocr = st.columns([1, 1])
-
-with col_img:
-    uploaded_img = st.file_uploader(
-        "操業メモの写真をアップロード",
-        type=["jpg", "jpeg", "png", "heic", "webp"],
-        key="memo_img",
-    )
-    if uploaded_img:
-        st.image(uploaded_img, caption="アップロードされたメモ", use_container_width=True)
-
-    if uploaded_img and st.button("📷 Claude Vision で読み取る", type="primary"):
-        with st.spinner("Claude Visionで解析中...（数秒かかります）"):
-            img_bytes = uploaded_img.read()
-            media_type = f"image/{uploaded_img.type.split('/')[-1]}"
-            if media_type == "image/heic":
-                media_type = "image/jpeg"
-            raw = extract_from_image(img_bytes, media_type)
-            st.session_state.ocr_data = validate_and_fill_defaults(raw)
-            # OCR結果の総鉢数をセッションに反映
-            if "error" not in st.session_state.ocr_data:
-                st.session_state.total_hachi = int(st.session_state.ocr_data.get("total_hachi") or 1)
-
-        if "error" in st.session_state.ocr_data:
-            st.error(f"読み取りエラー: {st.session_state.ocr_data['error']}")
-            if "raw" in st.session_state.ocr_data:
-                st.text_area("APIの生レスポンス", st.session_state.ocr_data["raw"], height=200)
-        else:
-            st.success("読み取り完了！右側で内容を確認・修正してください。")
-
-with col_ocr:
-    st.subheader("抽出データの確認・修正")
+with st.container():
+    st.subheader("操業データを入力してください")
 
     d = st.session_state.ocr_data or {}
     ctd = d.get("ctd") or {}
