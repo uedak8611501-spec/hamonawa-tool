@@ -120,6 +120,56 @@ def load_gps_csv(file_obj) -> pd.DataFrame:
     return df[["timestamp", "lat", "lon"] + [c for c in df.columns if c not in ("timestamp", "lat", "lon")]]
 
 
+def polyline_to_track(coords_latlon: list, op_date_str: str,
+                      start_hhmm: str, end_hhmm: str,
+                      n_points: int = 300) -> pd.DataFrame:
+    """
+    地図上で手描きした折れ線をGPS軌跡(DataFrame)に変換する。
+    GPSを取り忘れた日に、投入ルートを手描きして代用するための関数。
+
+    coords_latlon: [[lat, lon], ...] 手描き線の頂点
+    時刻は start_hhmm〜end_hhmm を距離に応じて等間隔に割り当てる。
+    """
+    if not coords_latlon or len(coords_latlon) < 2:
+        raise ValueError("線は2点以上で描いてください")
+
+    # ── 頂点間の累積距離を計算 ──
+    cum = [0.0]
+    for i in range(1, len(coords_latlon)):
+        la1, lo1 = coords_latlon[i - 1]
+        la2, lo2 = coords_latlon[i]
+        cum.append(cum[-1] + _haversine_m(la1, lo1, la2, lo2))
+    total = cum[-1]
+    if total <= 0:
+        raise ValueError("線の長さが0です。もう一度描いてください")
+
+    # ── 距離に沿って n_points 点に等間隔で補間 ──
+    op_date = datetime.strptime(op_date_str, "%Y-%m-%d").date()
+    start_dt = datetime.strptime(f"{op_date} {start_hhmm}", "%Y-%m-%d %H:%M")
+    end_dt = datetime.strptime(f"{op_date} {end_hhmm}", "%Y-%m-%d %H:%M")
+    duration = (end_dt - start_dt).total_seconds()
+
+    rows = []
+    for k in range(n_points):
+        target = total * k / (n_points - 1)
+        # target距離を含む区間を探す
+        seg_i = 0
+        for i in range(1, len(cum)):
+            if cum[i] >= target:
+                seg_i = i
+                break
+        seg_len = cum[seg_i] - cum[seg_i - 1]
+        frac = 0.0 if seg_len == 0 else (target - cum[seg_i - 1]) / seg_len
+        la1, lo1 = coords_latlon[seg_i - 1]
+        la2, lo2 = coords_latlon[seg_i]
+        lat = la1 + (la2 - la1) * frac
+        lon = lo1 + (lo2 - lo1) * frac
+        ts = start_dt + pd.Timedelta(seconds=duration * k / (n_points - 1))
+        rows.append({"timestamp": ts, "lat": lat, "lon": lon})
+
+    return pd.DataFrame(rows)
+
+
 def filter_by_time(df: pd.DataFrame, op_date: date, start_hhmm: str, end_hhmm: str) -> pd.DataFrame:
     """
     操業日・開始時刻・終了時刻でGPSログを絞り込む。

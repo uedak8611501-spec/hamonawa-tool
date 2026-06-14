@@ -8,10 +8,11 @@ from datetime import datetime, date, time
 import streamlit as st
 import pandas as pd
 import folium
+from folium.plugins import Draw
 from streamlit_folium import st_folium
 
 from ocr_extractor import extract_from_image, validate_and_fill_defaults
-from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments
+from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments, polyline_to_track
 from database import init_db, save_operation, list_operations, load_operation, delete_operation
 
 init_db()
@@ -33,6 +34,8 @@ if "segments" not in st.session_state:
     st.session_state.segments = None
 if "total_hachi" not in st.session_state:
     st.session_state.total_hachi = 1
+if "last_center" not in st.session_state:
+    st.session_state.last_center = [33.0, 132.2]  # 初期表示位置（後で実データで上書き）
 
 
 def _parse_time(s):
@@ -208,43 +211,105 @@ if not st.session_state.ocr_data or "error" in st.session_state.ocr_data:
     st.warning("先にSTEP 1で操業データを確定してください。")
 else:
     od = st.session_state.ocr_data
-    gps_file = st.file_uploader("GPS ログ CSV をアップロード", type=["csv", "txt"], key="gps_csv")
 
-    if gps_file:
-        # ── デバッグ：生CSVの列名と先頭3行を表示 ──
-        try:
-            raw_bytes = gps_file.read()
-            for enc in ("utf-8-sig", "utf-8", "shift_jis", "cp932"):
-                try:
-                    raw_text = raw_bytes.decode(enc)
-                    break
-                except Exception:
-                    continue
-            import io as _io
-            raw_df = pd.read_csv(_io.StringIO(raw_text), nrows=3)
-            with st.expander("🔍 デバッグ：生CSV（先頭3行）", expanded=True):
-                st.write("列名:", list(raw_df.columns))
-                st.write("先頭3行:")
-                st.dataframe(raw_df.iloc[:, :6])
-            gps_file.seek(0)
-        except Exception as e:
-            st.warning(f"デバッグ表示エラー: {e}")
+    gps_method = st.radio(
+        "GPSデータの取得方法を選んでください",
+        ["📂 CSVファイルをアップロード", "✏️ 地図に手で描く（GPS取り忘れた時）"],
+        horizontal=True,
+        key="gps_method",
+    )
+
+    # ─────────────────────────────────────────────────────
+    # 方法A：CSVアップロード
+    # ─────────────────────────────────────────────────────
+    if gps_method.startswith("📂"):
+        gps_file = st.file_uploader("GPS ログ CSV をアップロード", type=["csv", "txt"], key="gps_csv")
+
+        if gps_file:
+            # ── デバッグ：生CSVの列名と先頭3行を表示 ──
             try:
+                raw_bytes = gps_file.read()
+                for enc in ("utf-8-sig", "utf-8", "shift_jis", "cp932"):
+                    try:
+                        raw_text = raw_bytes.decode(enc)
+                        break
+                    except Exception:
+                        continue
+                import io as _io
+                raw_df = pd.read_csv(_io.StringIO(raw_text), nrows=3)
+                with st.expander("🔍 デバッグ：生CSV（先頭3行）", expanded=True):
+                    st.write("列名:", list(raw_df.columns))
+                    st.write("先頭3行:")
+                    st.dataframe(raw_df.iloc[:, :6])
                 gps_file.seek(0)
-            except Exception:
-                pass
+            except Exception as e:
+                st.warning(f"デバッグ表示エラー: {e}")
+                try:
+                    gps_file.seek(0)
+                except Exception:
+                    pass
 
-        try:
-            gps_df = load_gps_csv(gps_file)
-            st.session_state.gps_df = gps_df
-            st.success(f"GPSログ読み込み完了: {len(gps_df)} ポイント")
-            st.caption(f"時刻範囲: {gps_df['timestamp'].min()} 〜 {gps_df['timestamp'].max()}")
-            with st.expander("GPSデータのプレビュー（先頭10行）"):
-                st.dataframe(gps_df.head(10), use_container_width=True)
-        except ValueError as e:
-            st.error(str(e))
-            st.session_state.gps_df = None
+            try:
+                gps_df = load_gps_csv(gps_file)
+                st.session_state.gps_df = gps_df
+                st.success(f"GPSログ読み込み完了: {len(gps_df)} ポイント")
+                st.caption(f"時刻範囲: {gps_df['timestamp'].min()} 〜 {gps_df['timestamp'].max()}")
+                with st.expander("GPSデータのプレビュー（先頭10行）"):
+                    st.dataframe(gps_df.head(10), use_container_width=True)
+            except ValueError as e:
+                st.error(str(e))
+                st.session_state.gps_df = None
 
+    # ─────────────────────────────────────────────────────
+    # 方法B：地図に手で描く
+    # ─────────────────────────────────────────────────────
+    else:
+        st.caption(
+            "🖊️ 左の線ツールを選び、投入したルートを地図上でクリックしていきます。"
+            "最後はダブルクリックで線を確定 → 下の「この線をGPSとして使う」を押してください。"
+        )
+        draw_map = folium.Map(location=st.session_state.last_center, zoom_start=13, control_scale=True)
+        folium.TileLayer(
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri", name="衛星写真",
+        ).add_to(draw_map)
+        Draw(
+            export=False,
+            draw_options={
+                "polyline": True, "polygon": False, "rectangle": False,
+                "circle": False, "marker": False, "circlemarker": False,
+            },
+            edit_options={"edit": True, "remove": True},
+        ).add_to(draw_map)
+
+        draw_out = st_folium(draw_map, use_container_width=True, height=500, key="draw_map")
+
+        drawings = (draw_out or {}).get("all_drawings") or []
+        line_coords = None
+        for d in reversed(drawings):
+            geom = d.get("geometry", {})
+            if geom.get("type") == "LineString":
+                # GeoJSONは[経度,緯度]なので[緯度,経度]に変換
+                line_coords = [[c[1], c[0]] for c in geom["coordinates"]]
+                break
+
+        if line_coords:
+            st.success(f"線を認識しました（{len(line_coords)} 点）。下のボタンで確定してください。")
+            if st.button("✅ この線をGPSとして使う"):
+                try:
+                    track = polyline_to_track(
+                        line_coords, od["date"], od["start_time"], od["end_time"]
+                    )
+                    st.session_state.gps_df = track
+                    st.success(f"手描きルートをGPS軌跡に変換しました（{len(track)} 点）。")
+                except ValueError as e:
+                    st.error(str(e))
+        else:
+            st.info("まだ線が描かれていません。地図左上の線ツールで描いてください。")
+
+    # ─────────────────────────────────────────────────────
+    # 鉢分割（CSV・手描き 共通）
+    # ─────────────────────────────────────────────────────
     if st.session_state.gps_df is not None:
         if st.button("🔪 GPSトラックを鉢ごとに分割する", type="primary"):
             try:
@@ -346,6 +411,7 @@ else:
     all_lats = [s["center_lat"] for s in segs]
     all_lons = [s["center_lon"] for s in segs]
     center   = [sum(all_lats) / len(all_lats), sum(all_lons) / len(all_lons)]
+    st.session_state.last_center = center  # 手描き地図の初期表示に再利用
 
     # ── Folium地図を作成 ──────────────────────────────────
     m = folium.Map(location=center, zoom_start=13, control_scale=True)
