@@ -57,7 +57,7 @@ def catch_color(catch):
     elif catch >= 15:
         return "#ffd700"  # 黄：良
     elif catch >= 10:
-        return "#74add1"  # 水色：まあまあ
+        return "#7fbf3f"  # 黄緑：まあまあ
     else:
         return "#2c7bb6"  # 青：ダメ（0〜9匹）
 
@@ -81,11 +81,11 @@ CATCH_LEGEND_HTML = """
             background:white; padding:10px; border-radius:8px;
             border:1px solid #ccc; font-family:sans-serif; font-size:13px;">
   <b>釣果の凡例（匹数で固定）</b><br>
-  <span style="color:#d7191c;">●</span> 25匹以上（最高）<br>
-  <span style="color:#fd8d3c;">●</span> 20〜24匹（高）<br>
-  <span style="color:#ffd700;">●</span> 15〜19匹（良）<br>
-  <span style="color:#74add1;">●</span> 10〜14匹（まあまあ）<br>
-  <span style="color:#2c7bb6;">●</span> 0〜9匹（ダメ）<br>
+  <span style="color:#d7191c;">●</span> 25匹以上<br>
+  <span style="color:#fd8d3c;">●</span> 20〜24匹<br>
+  <span style="color:#ffd700;">●</span> 15〜19匹<br>
+  <span style="color:#7fbf3f;">●</span> 10〜14匹<br>
+  <span style="color:#2c7bb6;">●</span> 0〜9匹<br>
 </div>
 """
 
