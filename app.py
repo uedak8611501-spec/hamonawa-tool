@@ -80,7 +80,6 @@ CATCH_LEGEND_HTML = """
 <div style="position:fixed; bottom:30px; left:30px; z-index:1000;
             background:white; padding:10px; border-radius:8px;
             border:1px solid #ccc; font-family:sans-serif; font-size:13px;">
-  <b>釣果の凡例（匹数で固定）</b><br>
   <span style="color:#d7191c;">●</span> 25匹以上<br>
   <span style="color:#fd8d3c;">●</span> 20〜24匹<br>
   <span style="color:#ffd700;">●</span> 15〜19匹<br>
