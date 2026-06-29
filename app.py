@@ -593,9 +593,28 @@ else:
 
     with col_del:
         if st.button("🗑️ 削除する", type="secondary", use_container_width=True):
+            # 誤って消してもすぐ戻せるよう、削除する前に中身を退避しておく
+            deleted_ocr, deleted_segs = load_operation(selected_id)
+            st.session_state.last_deleted = {
+                "id":       selected_id,
+                "date":     deleted_ocr.get("date"),
+                "ocr_data": deleted_ocr,
+                "segments": deleted_segs,
+            }
             delete_operation(selected_id)
-            st.warning("削除しました。")
+            st.warning("削除しました。下の「↩️ 削除を取り消す」ですぐ戻せます。")
             st.rerun()
+
+# ── 削除の取り消し（直前の削除だけ復元できる） ──────────────
+# ※ if/else の外に置く。最後の1件を消すと履歴が空になり else に入らないため。
+if st.session_state.get("last_deleted"):
+    ld = st.session_state.last_deleted
+    st.info(f"🗑️ 直前に削除した操業（元ID{ld['id']}・{ld['date']}）を復元できます。")
+    if st.button("↩️ 削除を取り消す（復元する）", type="primary", use_container_width=True):
+        new_id = save_operation(ld["ocr_data"], ld["segments"])
+        st.session_state.last_deleted = None
+        st.success(f"復元しました！（新しいID{new_id}で保存し直しました）")
+        st.rerun()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
