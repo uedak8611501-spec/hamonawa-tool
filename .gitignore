@@ -1,0 +1,21 @@
+# アプリと無関係なデータ・画像ファイル（Streamlitデプロイを軽くするため追跡しない）
+# ※ローカルのファイル自体は残ります。GitHubに上げないだけです。
+*.zip
+*.jpg
+*.jpeg
+*.png
+*.HEIC
+*.heic
+*.xlsx
+*.xls
+*.csv
+*.CSV
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Streamlit Secrets（認証情報は絶対に上げない）
+.streamlit/secrets.toml
