@@ -8,7 +8,7 @@ from datetime import datetime, date, time
 import streamlit as st
 import pandas as pd
 import folium
-from folium.plugins import Draw
+from folium.plugins import Draw, HeatMap
 from streamlit_folium import st_folium
 
 from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments, polyline_to_track
@@ -755,3 +755,188 @@ else:
                 st.dataframe(valid.drop(columns=["水深帯"]), use_container_width=True, hide_index=True)
         else:
             st.warning("水深を取得できた鉢が少なく、分析できませんでした。")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# STEP 6: 水温で探す（魚の群れの再現性ポイント分析）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+st.header("STEP 6 　水温で探す 🌡🔍")
+st.caption(
+    "日付ではなく「水温」で過去の実績をしぼり込みます。"
+    "年によって海の進み方は違っても、同じ水温なら魚の群れは再現しやすい——"
+    "という考え方です。来年のハモ漁で「今この水温なら、ここが狙い目」を見つけるための機能です。"
+)
+
+st6_segs = load_all_segments()
+
+if not st6_segs:
+    st.info("GPS付きで保存した操業がまだありません。STEP 1〜4で保存すると、ここで水温検索できます。")
+else:
+    # ── 水温の種類を選ぶ（ふだんは底水温／レンタル機返却後は表層水温） ──
+    temp_source = st.radio(
+        "分析に使う水温",
+        ["底水温", "表層水温"],
+        horizontal=True,
+    )
+    temp_key = "bottom_temp" if temp_source == "底水温" else "surface_temp"
+    st.caption(
+        "ふだんは **底水温** で分析します。"
+        "底水温の計測機（レンタル）を返却したあとは「表層水温」に切り替えれば、"
+        "表層水温だけで同じ分析を続けられます。"
+    )
+
+    # 選んだ水温が記録されている鉢だけを対象にする
+    has_temp = [s for s in st6_segs if s.get(temp_key) is not None and s["center_lat"]]
+
+    if not has_temp:
+        st.warning(
+            f"{temp_source}が記録された操業がまだありません。"
+            f"{temp_source}を入力して保存すると、ここで検索できるようになります。"
+        )
+    else:
+        temps = [float(s[temp_key]) for s in has_temp]
+        tmin, tmax = min(temps), max(temps)
+
+        if tmin == tmax:
+            st.info(f"記録されている{temp_source}は {tmin}℃ の1種類だけです。全部を表示します。")
+            lo, hi = tmin, tmax
+        else:
+            # スライダーは少し余裕をもたせる（端のデータも選べるように）
+            s_min = round(tmin - 0.5, 1)
+            s_max = round(tmax + 0.5, 1)
+            lo, hi = st.slider(
+                f"{temp_source}レンジ（℃）　— このはばの水温だった鉢だけを表示します",
+                min_value=s_min, max_value=s_max,
+                value=(round(tmin, 1), round(tmax, 1)),
+                step=0.1,
+            )
+
+        # 選んだ水温レンジの鉢だけ抽出
+        sel = [s for s in has_temp if lo <= float(s[temp_key]) <= hi]
+        st.caption(
+            f"🌡 {temp_source} {lo}〜{hi}℃　→　該当 {len(sel)} 鉢"
+            f"（{len({s['op_date'] for s in sel})} 日分）"
+        )
+
+        if not sel:
+            st.warning("このレンジに当てはまる鉢がありません。はばを広げてみてください。")
+        else:
+            # ── ① 全体ヒートマップ ＋ ② レンジ検索の地図 ──
+            lats = [s["center_lat"] for s in sel]
+            lons = [s["center_lon"] for s in sel]
+            center6 = [sum(lats) / len(lats), sum(lons) / len(lons)]
+
+            m6 = folium.Map(location=center6, zoom_start=13, control_scale=True)
+            folium.TileLayer("OpenStreetMap", name="標準地図").add_to(m6)
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri", name="衛星写真",
+            ).add_to(m6)
+            folium.TileLayer(
+                tiles="https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
+                attr="OpenSeaMap", name="海図レイヤー", overlay=True,
+            ).add_to(m6)
+
+            # 釣れた数が多いほど赤く濃く光るヒートマップ
+            heat_data = [
+                [s["center_lat"], s["center_lon"], float(s["catch"])]
+                for s in sel if s["catch"] and s["catch"] > 0
+            ]
+            if heat_data:
+                HeatMap(
+                    heat_data, name="🔥 釣果ヒートマップ",
+                    radius=22, blur=18, min_opacity=0.35,
+                ).add_to(m6)
+
+            # 鉢ごとの軌跡も色分けで重ねる（個別に見たいとき用）
+            track_group = folium.FeatureGroup(name="鉢ごとの軌跡", show=False)
+            for s in sel:
+                try:
+                    gps = json.loads(s["gps_points"]) if s["gps_points"] else []
+                except Exception:
+                    gps = []
+                if len(gps) < 2:
+                    continue
+                coords = [(p[0], p[1]) for p in gps]
+                color = catch_color(s["catch"])
+                popup_html = f"""
+                <div style="font-family:sans-serif; min-width:180px;">
+                  <h4 style="margin:4px 0; color:{color};">{s['op_date']} 第{s['hachi_no']}鉢</h4>
+                  <hr style="margin:4px 0;">
+                  <b>🐟 釣果：</b>{s['catch']} 匹<br>
+                  <b>🌡 {temp_source}：</b>{s[temp_key]}℃<br>
+                  <b>📍 場所：</b>{s['location'] or '—'}<br>
+                </div>
+                """
+                folium.PolyLine(
+                    locations=coords, color=color, weight=catch_weight(s["catch"]),
+                    opacity=0.8,
+                    tooltip=f"{s['op_date']} 第{s['hachi_no']}鉢：{s['catch']}匹（{s[temp_key]}℃）",
+                    popup=folium.Popup(popup_html, max_width=260),
+                ).add_to(track_group)
+            track_group.add_to(m6)
+
+            folium.LayerControl(collapsed=False).add_to(m6)
+            m6.get_root().html.add_child(folium.Element(CATCH_LEGEND_HTML))
+
+            st.caption("🔥 赤く光る場所＝この水温のときによく釣れる鉄板エリアです（左上で軌跡の表示も切り替えられます）")
+            st_folium(m6, use_container_width=True, height=600, returned_objects=[], key="map6")
+
+            # ── ③ よく釣れる場所の環境リスト（水深ごと） ──
+            st.markdown("---")
+            st.subheader("📋 この水温でよく釣れる場所の環境リスト")
+            st.caption(
+                "選んだ水温レンジで、海底の水深ごとに「平均何匹／最大何匹／何回釣れたか」をまとめます。"
+                "水深はGEBCO（約450mメッシュ）から自動取得します。"
+            )
+
+            if st.button("🌊 水深を取得して環境リストを作る", type="primary", key="depth_btn6"):
+                coords_all = tuple(
+                    (round(s["center_lat"], 4), round(s["center_lon"], 4))
+                    for s in has_temp
+                )
+                with st.spinner("海底水深データを取得中...（数秒）"):
+                    depths_all = get_depths(coords_all)
+                # 座標→水深 の対応表を作って退避（スライダーを動かしても再取得しない）
+                dmap = {}
+                for (la, lo_), d in zip(coords_all, depths_all):
+                    dmap[(la, lo_)] = d
+                st.session_state.temp_depth_map = dmap
+
+            dmap = st.session_state.get("temp_depth_map")
+            if dmap:
+                rows = []
+                for s in sel:
+                    key = (round(s["center_lat"], 4), round(s["center_lon"], 4))
+                    d = dmap.get(key)
+                    if d is None:
+                        continue
+                    rows.append({"水深(m)": d, "釣果(匹)": s["catch"]})
+
+                env_df = pd.DataFrame(rows)
+                if len(env_df) >= 1:
+                    bins = [0, 20, 40, 60, 80, 100, 9999]
+                    labels = ["0-20m", "20-40m", "40-60m", "60-80m", "80-100m", "100m以上"]
+                    env_df["水深帯"] = pd.cut(env_df["水深(m)"], bins=bins, labels=labels, right=False)
+                    band = env_df.groupby("水深帯", observed=True)["釣果(匹)"].agg(
+                        ["mean", "max", "count"]
+                    )
+                    band = band.rename(
+                        columns={"mean": "平均釣果", "max": "最大釣果", "count": "鉢数"}
+                    )
+                    band["平均釣果"] = band["平均釣果"].round(1)
+                    band["底質"] = "（海しるAPI準備中）"  # ← キー取得後にここを埋める
+                    st.dataframe(band, use_container_width=True)
+
+                    # いちばん釣れている水深帯をひとことで
+                    best = band["平均釣果"].idxmax()
+                    best_avg = band.loc[best, "平均釣果"]
+                    st.success(
+                        f"💡 {temp_source} {lo}〜{hi}℃ のときは、"
+                        f"**水深 {best} で平均 {best_avg} 匹** がいちばんの狙い目です。"
+                    )
+                    st.caption(
+                        "※「底質（砂・泥・礫）」の列は、海しるAPIの無料キーが取れ次第ここに表示します。"
+                    )
+                else:
+                    st.warning("このレンジでは水深を取得できた鉢がありませんでした。")
