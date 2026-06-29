@@ -837,16 +837,21 @@ else:
                 attr="OpenSeaMap", name="海図レイヤー", overlay=True,
             ).add_to(m6)
 
-            # 釣れた数が多いほど赤く濃く光るヒートマップ
+            # ヒートマップは「10匹以上」釣れた鉢だけで集計する。
+            # ※9匹以下のダメなポイントは、何回やっても釣れない。それを点の数で
+            #   積み上げてしまうと色が濃く見えて誤解を生むため、集計から除外する。
+            HEAT_MIN_CATCH = 10
             heat_data = [
                 [s["center_lat"], s["center_lon"], float(s["catch"])]
-                for s in sel if s["catch"] and s["catch"] > 0
+                for s in sel if s["catch"] and s["catch"] >= HEAT_MIN_CATCH
             ]
             if heat_data:
                 HeatMap(
-                    heat_data, name="🔥 釣果ヒートマップ",
+                    heat_data, name="🔥 釣果ヒートマップ（10匹以上）",
                     radius=22, blur=18, min_opacity=0.35,
                 ).add_to(m6)
+            else:
+                st.info("このレンジには10匹以上釣れた鉢がないため、ヒートマップは表示されません。")
 
             # 鉢ごとの軌跡も色分けで重ねる（個別に見たいとき用）
             track_group = folium.FeatureGroup(name="鉢ごとの軌跡", show=False)
@@ -879,7 +884,7 @@ else:
             folium.LayerControl(collapsed=False).add_to(m6)
             m6.get_root().html.add_child(folium.Element(CATCH_LEGEND_HTML))
 
-            st.caption("🔥 赤く光る場所＝この水温のときによく釣れる鉄板エリアです（左上で軌跡の表示も切り替えられます）")
+            st.caption("🔥 赤く光る場所＝この水温のときによく釣れる鉄板エリアです（**10匹以上**の鉢だけで集計。左上で軌跡の表示も切り替えられます）")
             st_folium(m6, use_container_width=True, height=600, returned_objects=[], key="map6")
 
             # ── ③ よく釣れる場所の環境リスト（水深ごと） ──
