@@ -12,7 +12,7 @@ from folium.plugins import Draw
 from streamlit_folium import st_folium
 
 from gps_processor import load_gps_csv, filter_by_time, split_into_hachi, merge_catch_to_segments, polyline_to_track
-from database import init_db, save_operation, list_operations, load_operation, delete_operation, load_all_segments
+from database import init_db, save_operation, update_operation, list_operations, load_operation, delete_operation, load_all_segments
 from seabed import get_depths
 
 init_db()
@@ -36,6 +36,8 @@ if "total_hachi" not in st.session_state:
     st.session_state.total_hachi = 1
 if "last_center" not in st.session_state:
     st.session_state.last_center = [33.0, 132.2]  # 初期表示位置（後で実データで上書き）
+if "editing_op_id" not in st.session_state:
+    st.session_state.editing_op_id = None  # 編集中の操業ID（修正モード）
 
 
 def _parse_time(s, default=time(6, 0)):
@@ -95,6 +97,17 @@ CATCH_LEGEND_HTML = """
 st.header("STEP 1 　操業データの入力")
 
 with st.container():
+    if st.session_state.editing_op_id is not None:
+        ecol1, ecol2 = st.columns([3, 1])
+        with ecol1:
+            st.warning(f"✏️ 編集モード：操業ID {st.session_state.editing_op_id} を修正中。"
+                       "値を直して STEP 4 の「編集を保存」を押してください。")
+        with ecol2:
+            if st.button("✖ 編集をやめる"):
+                st.session_state.editing_op_id = None
+                st.session_state.ocr_data = None
+                st.session_state.segments = None
+                st.rerun()
     st.subheader("操業データを入力してください")
 
     d = st.session_state.ocr_data or {}
@@ -493,20 +506,32 @@ if st.session_state.ocr_data and "error" not in st.session_state.ocr_data:
         f"{od.get('total_hachi')} 鉢"
     )
 
-    if not has_gps:
+    if not has_gps and st.session_state.editing_op_id is None:
         st.warning(
             "⚠️ GPSログがありません（STEP 2未実施）。"
             "釣果・水温などの記録だけ保存します。地図表示はできませんが、データは残ります。"
         )
 
-    if st.button("📥 このデータをDBに保存する", type="primary"):
-        try:
-            segs = st.session_state.segments or []
-            op_id = save_operation(od, segs)
-            st.success(f"✅ 保存しました！（操業ID: {op_id}）")
-            st.rerun()
-        except Exception as e:
-            st.error(f"保存エラー: {e}")
+    if st.session_state.editing_op_id is not None:
+        # ── 編集モード：既存レコードを上書き ──
+        if st.button("✏️ 編集を保存（上書き）", type="primary"):
+            try:
+                update_operation(st.session_state.editing_op_id, od)
+                st.success(f"✅ 操業ID {st.session_state.editing_op_id} を更新しました！")
+                st.session_state.editing_op_id = None
+                st.rerun()
+            except Exception as e:
+                st.error(f"更新エラー: {e}")
+    else:
+        # ── 新規保存 ──
+        if st.button("📥 このデータをDBに保存する", type="primary"):
+            try:
+                segs = st.session_state.segments or []
+                op_id = save_operation(od, segs)
+                st.success(f"✅ 保存しました！（操業ID: {op_id}）")
+                st.rerun()
+            except Exception as e:
+                st.error(f"保存エラー: {e}")
 else:
     st.info("STEP 1 で操業データを確定すると、ここから保存できます（GPSは無くてもOK）。")
 
@@ -535,26 +560,39 @@ else:
     } for o in ops])
     st.dataframe(df_ops, use_container_width=True, hide_index=True)
 
-    # 読み込みと削除
-    col_load, col_del = st.columns([2, 1])
+    # 操業を選択
+    selected_id = st.selectbox(
+        "操業を選ぶ",
+        options=[o["id"] for o in ops],
+        format_func=lambda i: next(
+            f"ID{o['id']}　{o['op_date']} ({o['total_catch']}匹/{o['total_hachi']}鉢)"
+            for o in ops if o["id"] == i
+        ),
+    )
+
+    col_load, col_edit, col_del = st.columns(3)
     with col_load:
-        selected_id = st.selectbox(
-            "操業を選んで地図で見る",
-            options=[o["id"] for o in ops],
-            format_func=lambda i: next(
-                f"{o['op_date']} ({o['total_catch']}匹/{o['total_hachi']}鉢)"
-                for o in ops if o["id"] == i
-            ),
-        )
-        if st.button("🗺️ 選択した操業を読み込む"):
+        if st.button("🗺️ 地図で見る", use_container_width=True):
             loaded_ocr, loaded_segs = load_operation(selected_id)
             st.session_state.ocr_data  = loaded_ocr
             st.session_state.segments  = loaded_segs
+            st.session_state.total_hachi = int(loaded_ocr.get("total_hachi") or 1)
+            st.session_state.editing_op_id = None
             st.success("読み込みました！STEP 3 の地図が更新されます。")
             st.rerun()
 
+    with col_edit:
+        if st.button("✏️ 編集する", use_container_width=True):
+            loaded_ocr, loaded_segs = load_operation(selected_id)
+            st.session_state.ocr_data  = loaded_ocr
+            st.session_state.segments  = loaded_segs
+            st.session_state.total_hachi = int(loaded_ocr.get("total_hachi") or 1)
+            st.session_state.editing_op_id = selected_id
+            st.success(f"ID {selected_id} を編集モードで開きました。STEP 1 で値を直してください。")
+            st.rerun()
+
     with col_del:
-        if st.button("🗑️ 選択した操業を削除", type="secondary"):
+        if st.button("🗑️ 削除する", type="secondary", use_container_width=True):
             delete_operation(selected_id)
             st.warning("削除しました。")
             st.rerun()

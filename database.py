@@ -161,6 +161,53 @@ def save_operation(ocr_data: dict, segments: list[dict]) -> int:
     return op_id
 
 
+def update_operation(op_id: int, ocr_data: dict):
+    """
+    既存の操業データを上書き更新する（過去履歴の修正用）。
+    操業レベルの情報（日付・場所・時刻・CTD等）を更新し、
+    各鉢の釣果(catch)も hachi_no で対応付けて更新する。
+    GPS軌跡(gps_points)や中心座標は変更しない。
+    """
+    init_db()
+    ctd = ocr_data.get("ctd") or {}
+    catch_list = ocr_data.get("catch_per_hachi", [])
+    total_catch = sum(x["count"] for x in catch_list)
+
+    _d1_query(
+        """
+        UPDATE operations SET
+          op_date=?, location=?, bait=?, start_time=?, end_time=?,
+          total_hachi=?, total_catch=?,
+          surface_temp=?, bottom_temp=?, surface_salinity=?, bottom_salinity=?,
+          max_depth=?, notes=?
+        WHERE id=?
+        """,
+        [
+            ocr_data.get("date"),
+            ocr_data.get("location"),
+            ocr_data.get("bait"),
+            ocr_data.get("start_time"),
+            ocr_data.get("end_time"),
+            ocr_data.get("total_hachi"),
+            total_catch,
+            ctd.get("surface_temp"),
+            ctd.get("bottom_temp"),
+            ctd.get("surface_salinity"),
+            ctd.get("bottom_salinity"),
+            ctd.get("max_depth"),
+            ocr_data.get("notes"),
+            op_id,
+        ],
+    )
+
+    # 各鉢の釣果を更新（GPS軌跡があるセグメントのみ反映される）
+    for item in catch_list:
+        _d1_query(
+            "UPDATE segments SET catch=? WHERE operation_id=? AND hachi_no=?",
+            [item["count"], op_id, item["hachi"]],
+        )
+
+
 def list_operations() -> list[dict]:
     """保存済み操業一覧を返す（新しい順）"""
     init_db()
