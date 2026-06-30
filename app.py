@@ -7,6 +7,7 @@ from datetime import datetime, date, time
 
 import streamlit as st
 import pandas as pd
+import altair as alt
 import folium
 from folium.plugins import Draw, HeatMap
 from streamlit_folium import st_folium
@@ -967,6 +968,22 @@ else:
                         st.caption("※まだ「2回以上やったマス」が少なく、鉄板の断定はできません。データが貯まると出ます。")
 
                     # バブル図：よこ＝水深 / たて＝水温 / 丸の大きさ＝釣果
-                    st.markdown("**バブル図：よこ＝水深 / たて＝水温 / 丸の大きさ＝釣果**")
+                    # 水温の縦軸は 15〜25℃ に固定し、いつも同じ目盛りで読めるようにする。
+                    st.markdown("**バブル図：よこ＝水深 / たて＝水温(15〜25℃) / 丸の大きさ＝釣果**")
                     st.caption("大きい丸が固まっている所＝その水温×水深がよく釣れる組み合わせです。")
-                    st.scatter_chart(grid_df, x="水深", y="水温", size="釣果", height=420)
+                    bubble = (
+                        alt.Chart(grid_df)
+                        .mark_circle(opacity=0.6)
+                        .encode(
+                            x=alt.X("水深:Q", title="水深(m)"),
+                            y=alt.Y(
+                                "水温:Q", title="水温(℃)",
+                                scale=alt.Scale(domain=[15, 25]),
+                            ),
+                            size=alt.Size("釣果:Q", title="釣果(匹)", scale=alt.Scale(range=[20, 600])),
+                            color=alt.Color("釣果:Q", title="釣果(匹)", scale=alt.Scale(scheme="turbo")),
+                            tooltip=["水温", "水深", "釣果"],
+                        )
+                        .properties(height=420)
+                    )
+                    st.altair_chart(bubble, use_container_width=True)
