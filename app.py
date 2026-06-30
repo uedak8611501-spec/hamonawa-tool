@@ -722,10 +722,17 @@ else:
         "ふだんは **底水温** で分析します。"
         "底水温の計測機（レンタル）を返却したあとは「表層水温」に切り替えれば、"
         "表層水温だけで同じ分析を続けられます。"
+        "（水温が **0℃** の鉢は「計測なし」とみなして分析から除外します）"
     )
 
-    # 選んだ水温が記録されている鉢だけを対象にする
-    has_temp = [s for s in st6_segs if s.get(temp_key) is not None and s["center_lat"]]
+    # 選んだ水温が記録されている鉢だけを対象にする。
+    # 水温0℃は「計測なし」を意味するので、分析から除外する。
+    has_temp = [
+        s for s in st6_segs
+        if s.get(temp_key) is not None
+        and float(s[temp_key]) != 0
+        and s["center_lat"]
+    ]
 
     if not has_temp:
         st.warning(
