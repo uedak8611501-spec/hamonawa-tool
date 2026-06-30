@@ -690,71 +690,10 @@ else:
     st.caption("赤い線が重なる場所＝いつもよく釣れる鉄板ポイントです")
     st_folium(m5, use_container_width=True, height=600, returned_objects=[])
 
-    # ─────────────────────────────────────────────────────
-    # 水深 × 釣果の分析（GEBCO水深を自動取得）
-    # ─────────────────────────────────────────────────────
-    st.markdown("---")
-    st.subheader("🌊 水深 × 釣果の関係を分析")
-    st.caption(
-        "各鉢の中心座標から海底水深（GEBCO・約450mメッシュ）を自動取得し、"
-        "釣果との関係を調べます。「どのくらいの水深でハモが釣れるか」が見えてきます。"
-    )
-
-    if st.button("📊 水深を取得して分析する", type="primary"):
-        coords = tuple(
-            (round(s["center_lat"], 4), round(s["center_lon"], 4))
-            for s in view_segs if s["center_lat"]
-        )
-        with st.spinner("海底水深データを取得中...（数秒）"):
-            depths = get_depths(coords)
-        rows = []
-        di = 0
-        for s in view_segs:
-            if not s["center_lat"]:
-                continue
-            d = depths[di] if di < len(depths) else None
-            di += 1
-            rows.append({
-                "操業日": s["op_date"],
-                "鉢": s["hachi_no"],
-                "釣果(匹)": s["catch"],
-                "水深(m)": d,
-            })
-        st.session_state.depth_df = pd.DataFrame(rows)
-
-    if st.session_state.get("depth_df") is not None:
-        dfd = st.session_state.depth_df
-        valid = dfd.dropna(subset=["水深(m)"])
-
-        if len(valid) >= 2:
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.markdown("**散布図：横軸=水深 / 縦軸=釣果**")
-                st.scatter_chart(valid, x="水深(m)", y="釣果(匹)", height=320)
-            with c2:
-                corr = valid["水深(m)"].corr(valid["釣果(匹)"])
-                st.metric("水深と釣果の相関", f"{corr:+.2f}")
-                st.caption(
-                    "＋に近い→深いほど釣れる\n"
-                    "−に近い→浅いほど釣れる\n"
-                    "0付近→水深はあまり関係ない"
-                )
-
-            # 水深帯ごとの平均釣果
-            st.markdown("**水深帯ごとの平均釣果**")
-            bins = [0, 20, 40, 60, 80, 100, 9999]
-            labels = ["0-20m", "20-40m", "40-60m", "60-80m", "80-100m", "100m以上"]
-            valid = valid.copy()
-            valid["水深帯"] = pd.cut(valid["水深(m)"], bins=bins, labels=labels, right=False)
-            band = valid.groupby("水深帯", observed=True)["釣果(匹)"].agg(["mean", "count"])
-            band = band.rename(columns={"mean": "平均釣果", "count": "鉢数"})
-            band["平均釣果"] = band["平均釣果"].round(1)
-            st.dataframe(band, use_container_width=True)
-
-            with st.expander("鉢ごとの水深データを見る"):
-                st.dataframe(valid.drop(columns=["水深帯"]), use_container_width=True, hide_index=True)
-        else:
-            st.warning("水深を取得できた鉢が少なく、分析できませんでした。")
+    # 「水深 × 釣果」の単独分析はリセット（削除）した。
+    # 理由: 水深だけでは釣果を説明できない（同じ場所でも釣れる日と釣れない日がある）。
+    #       水温など他の条件と運が混ざるため、水深単独の相関は誤った傾向を示す。
+    # 今後は「水温 × 水深」を組み合わせた分析（STEP 6で検討中）に置き換える。
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
