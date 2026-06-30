@@ -884,3 +884,82 @@ else:
                     )
                 else:
                     st.warning("このレンジでは水深を取得できた鉢がありませんでした。")
+
+            # ── ④ 水温×水深 の早見表＋バブル図（スライダーに関係なく全データで集計） ──
+            st.markdown("---")
+            st.subheader("📊 水温 × 水深 の早見表（鉄板の組み合わせさがし）")
+            st.caption(
+                "水深だけ・水温だけでは釣果は決まりません。"
+                "「水温帯 × 水深帯」の組み合わせごとに平均釣果と回数をまとめます。"
+                "上のスライダーに関係なく全データで集計します。"
+                "回数が多いマスほど信用でき、回数1は“まだ運かも”です。"
+            )
+
+            if not dmap:
+                st.info("上の「🌊 水深を取得して環境リストを作る」ボタンを押すと、ここに早見表が出ます。")
+            else:
+                grid_rows = []
+                for s in has_temp:
+                    key = (round(s["center_lat"], 4), round(s["center_lon"], 4))
+                    d = dmap.get(key)
+                    if d is None:
+                        continue
+                    grid_rows.append({
+                        "水温": float(s[temp_key]),
+                        "水深": d,
+                        "釣果": s["catch"],
+                    })
+                grid_df = pd.DataFrame(grid_rows)
+
+                if len(grid_df) < 1:
+                    st.warning("水深を取得できた鉢がなく、早見表を作れませんでした。")
+                else:
+                    # 水温帯＝1℃ごと / 水深帯＝20mごと に区切る
+                    t_lo = int(grid_df["水温"].min())
+                    t_hi = int(grid_df["水温"].max()) + 1
+                    t_edges = list(range(t_lo, t_hi + 1))
+                    t_labels = [f"{t_edges[i]}-{t_edges[i+1]}℃" for i in range(len(t_edges) - 1)]
+                    d_edges = [0, 20, 40, 60, 80, 100, 9999]
+                    d_labels = ["0-20m", "20-40m", "40-60m", "60-80m", "80-100m", "100m以上"]
+
+                    grid_df["水温帯"] = pd.cut(grid_df["水温"], bins=t_edges, labels=t_labels, right=False)
+                    grid_df["水深帯"] = pd.cut(grid_df["水深"], bins=d_edges, labels=d_labels, right=False)
+
+                    mean_p = grid_df.pivot_table(
+                        index="水温帯", columns="水深帯", values="釣果",
+                        aggfunc="mean", observed=True,
+                    )
+                    cnt_p = grid_df.pivot_table(
+                        index="水温帯", columns="水深帯", values="釣果",
+                        aggfunc="count", observed=True,
+                    )
+
+                    # 「平均(回数)」の文字に整形して表示
+                    disp = pd.DataFrame(index=mean_p.index, columns=mean_p.columns, dtype="object")
+                    for i in mean_p.index:
+                        for c in mean_p.columns:
+                            m = mean_p.loc[i, c]
+                            n = cnt_p.loc[i, c]
+                            disp.loc[i, c] = f"{m:.0f}匹({int(n)}回)" if pd.notna(m) else "—"
+
+                    st.markdown("**早見表：たて＝水温帯 / よこ＝水深帯　→　平均釣果(回数)**")
+                    st.dataframe(disp, use_container_width=True)
+
+                    # いちばん信用できる組み合わせ（2回以上やって平均が高いマス）
+                    trust = mean_p.where(cnt_p >= 2)
+                    if trust.notna().to_numpy().any():
+                        stacked = trust.stack()
+                        bi = stacked.idxmax()
+                        bv = stacked.max()
+                        st.success(
+                            f"💡 いちばん信用できる鉄板の組み合わせ："
+                            f"**水温 {bi[0]} × 水深 {bi[1]} → 平均 {bv:.0f}匹"
+                            f"（{int(cnt_p.loc[bi])}回）**"
+                        )
+                    else:
+                        st.caption("※まだ「2回以上やったマス」が少なく、鉄板の断定はできません。データが貯まると出ます。")
+
+                    # バブル図：よこ＝水深 / たて＝水温 / 丸の大きさ＝釣果
+                    st.markdown("**バブル図：よこ＝水深 / たて＝水温 / 丸の大きさ＝釣果**")
+                    st.caption("大きい丸が固まっている所＝その水温×水深がよく釣れる組み合わせです。")
+                    st.scatter_chart(grid_df, x="水深", y="水温", size="釣果", height=420)
