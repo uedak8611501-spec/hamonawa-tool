@@ -743,19 +743,19 @@ else:
         temps = [float(s[temp_key]) for s in has_temp]
         tmin, tmax = min(temps), max(temps)
 
-        if tmin == tmax:
-            st.info(f"記録されている{temp_source}は {tmin}℃ の1種類だけです。全部を表示します。")
-            lo, hi = tmin, tmax
-        else:
-            # スライダーは少し余裕をもたせる（端のデータも選べるように）
-            s_min = round(tmin - 0.5, 1)
-            s_max = round(tmax + 0.5, 1)
-            lo, hi = st.slider(
-                f"{temp_source}レンジ（℃）　— このはばの水温だった鉢だけを表示します",
-                min_value=s_min, max_value=s_max,
-                value=(round(tmin, 1), round(tmax, 1)),
-                step=0.1,
-            )
+        # スライダーは 15〜25℃ の固定はばで、0.1℃きざみで細かく見られるようにする。
+        s_min, s_max = 15.0, 25.0
+        # 初期表示は実際のデータの最小〜最大（ただし15〜25の範囲内に収める）
+        default_lo = max(s_min, round(tmin, 1))
+        default_hi = min(s_max, round(tmax, 1))
+        if default_lo > default_hi:
+            default_lo, default_hi = s_min, s_max
+        lo, hi = st.slider(
+            f"{temp_source}レンジ（℃）　— このはばの水温だった鉢だけを表示します",
+            min_value=s_min, max_value=s_max,
+            value=(default_lo, default_hi),
+            step=0.1,
+        )
 
         # 選んだ水温レンジの鉢だけ抽出
         sel = [s for s in has_temp if lo <= float(s[temp_key]) <= hi]
