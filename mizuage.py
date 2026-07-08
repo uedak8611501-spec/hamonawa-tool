@@ -13,11 +13,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(
-    page_title="水揚げ集計",
-    page_icon="📊",
-    layout="wide",
-)
+# ページ設定は app.py（エントリポイント）で一括して行う
 
 st.title("📊 水揚げ集計（朝日水産 仕切票）")
 
