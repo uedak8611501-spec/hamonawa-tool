@@ -114,12 +114,16 @@ if st.button("🔄 最新データに更新"):
     st.cache_data.clear()
     st.rerun()
 
+# 棒の太さ: 表示期間の日数に合わせて自動調整（隣の日と重ならない範囲で太く）
+span_days = max((mizuage["日付"].max() - mizuage["日付"].min()).days + 1, 1)
+bar_size = max(5, min(30, int(550 / span_days * 0.7)))
+
 # ── 1. 日別の水揚げ量（魚種で色分け）─────────────────────────
 st.subheader("日別の水揚げ量（魚種別）")
 daily = (mizuage.groupby(["日付", "魚種"], as_index=False)["重量(kg)"].sum())
 chart_daily = (
     alt.Chart(daily)
-    .mark_bar()
+    .mark_bar(size=bar_size)
     .encode(
         x=alt.X("日付:T", title="", axis=alt.Axis(format="%m/%d")),
         y=alt.Y("重量(kg):Q", title="水揚げ量 (kg)"),
@@ -140,7 +144,7 @@ if not hamo.empty:
     hamo_daily = hamo.groupby(["日付", "サイズ"], as_index=False)["重量(kg)"].sum()
     chart_hamo = (
         alt.Chart(hamo_daily)
-        .mark_bar()
+        .mark_bar(size=bar_size)
         .encode(
             x=alt.X("日付:T", title="", axis=alt.Axis(format="%m/%d")),
             y=alt.Y("重量(kg):Q", title="水揚げ量 (kg)"),
@@ -157,26 +161,7 @@ if not hamo.empty:
 else:
     st.info("この期間はハモの水揚げがありません。")
 
-# ── 3. 魚種別の合計 ──────────────────────────────────────────
-st.subheader("魚種別の合計水揚げ量")
-by_species = (mizuage.groupby("魚種", as_index=False)["重量(kg)"].sum()
-              .sort_values("重量(kg)", ascending=False))
-chart_sp = (
-    alt.Chart(by_species)
-    .mark_bar()
-    .encode(
-        x=alt.X("重量(kg):Q", title="合計 (kg)"),
-        y=alt.Y("魚種:N", sort="-x", title=""),
-        color=alt.Color("魚種:N", legend=None,
-                        scale=alt.Scale(scheme="tableau10")),
-        tooltip=["魚種:N", alt.Tooltip("重量(kg):Q", format=".1f")],
-    )
-    .properties(height=30 * max(len(by_species), 3))
-)
-st.altair_chart(chart_sp, use_container_width=True)
-st.caption("※ハモが大半なので、他の魚種は「直近30日」などに絞ると見やすいです。")
-
-# ── 4. 月別まとめ（水揚げ・餌代）────────────────────────────
+# ── 3. 月別まとめ（水揚げ・餌代）────────────────────────────
 st.subheader("月別まとめ")
 m = mizuage.copy()
 m["月"] = m["日付"].dt.strftime("%Y-%m")
@@ -194,6 +179,7 @@ else:
 summary = pd.DataFrame({
     "出漁日数": monthly_days,
     "水揚げ (kg)": monthly_kg.round(1),
+    "1日平均 (kg)": (monthly_kg / monthly_days).round(1),
     "餌代 (円)": monthly_esa.round(0),
 }).fillna(0)
 st.dataframe(summary, use_container_width=True)
