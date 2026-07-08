@@ -103,7 +103,7 @@ def init_db():
 
 def save_operation(ocr_data: dict, segments: list[dict]) -> int:
     """操業データと分割セグメントをD1に保存する。Returns: 新規レコードのID"""
-    init_db()
+    # init_db() はアプリ起動時に1回だけ呼ぶ（毎回呼ぶと通信が増えて遅くなる）
     ctd = ocr_data.get("ctd") or {}
     total_catch = sum(x["count"] for x in ocr_data.get("catch_per_hachi", []))
 
@@ -168,7 +168,6 @@ def update_operation(op_id: int, ocr_data: dict):
     各鉢の釣果(catch)も hachi_no で対応付けて更新する。
     GPS軌跡(gps_points)や中心座標は変更しない。
     """
-    init_db()
     ctd = ocr_data.get("ctd") or {}
     catch_list = ocr_data.get("catch_per_hachi", [])
     total_catch = sum(x["count"] for x in catch_list)
@@ -210,7 +209,6 @@ def update_operation(op_id: int, ocr_data: dict):
 
 def list_operations() -> list[dict]:
     """保存済み操業一覧を返す（新しい順）"""
-    init_db()
     result = _d1_query(
         "SELECT * FROM operations ORDER BY op_date DESC, start_time DESC"
     )
@@ -219,7 +217,6 @@ def list_operations() -> list[dict]:
 
 def load_operation(op_id: int) -> tuple[dict, list[dict]]:
     """指定IDの操業データとセグメントを返す。"""
-    init_db()
     op_result = _d1_query("SELECT * FROM operations WHERE id=?", [op_id])
     op = op_result["results"][0]
 
@@ -276,7 +273,6 @@ def load_all_segments() -> list[dict]:
     全操業の全セグメントを操業情報付きで返す（重ね地図・集計分析用）。
     各行に op_date / location / bait / CTD環境データが結合される。
     """
-    init_db()
     result = _d1_query("""
         SELECT
             s.operation_id, s.hachi_no, s.catch,
@@ -294,6 +290,5 @@ def load_all_segments() -> list[dict]:
 
 def delete_operation(op_id: int):
     """指定IDの操業データを削除する"""
-    init_db()
     _d1_query("DELETE FROM segments WHERE operation_id=?", [op_id])
     _d1_query("DELETE FROM operations WHERE id=?", [op_id])

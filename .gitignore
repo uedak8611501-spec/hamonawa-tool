@@ -11,6 +11,9 @@
 *.csv
 *.CSV
 
+# 退避ファイル
+*.bak
+
 # Python
 __pycache__/
 *.pyc

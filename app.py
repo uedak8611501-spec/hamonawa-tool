@@ -39,6 +39,8 @@ if "last_center" not in st.session_state:
     st.session_state.last_center = [33.0, 132.2]  # 初期表示位置（後で実データで上書き）
 if "editing_op_id" not in st.session_state:
     st.session_state.editing_op_id = None  # 編集中の操業ID（修正モード）
+if "saved_op_id" not in st.session_state:
+    st.session_state.saved_op_id = None  # 保存済み操業ID（二重保存ガード）
 
 
 def _parse_time(s, default=time(6, 0)):
@@ -48,6 +50,39 @@ def _parse_time(s, default=time(6, 0)):
         return datetime.strptime(s, "%H:%M").time()
     except ValueError:
         return default
+
+
+def _num_or_none(v):
+    """CTDの値を数値に。0や未入力は「計測なし」としてNoneを返す"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f != 0 else None
+
+
+def _fmt(v):
+    """未計測(None)を「—」で表示する"""
+    return "—" if v is None else v
+
+
+# ── DB読み込みキャッシュ ─────────────────────────────────────
+# スライダー操作などの再描画のたびにCloudflareへ取りに行かないよう、
+# 読み込み結果を一時記憶する。保存・編集・削除のあとは clear_db_cache() で最新化。
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_operations():
+    return list_operations()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_all_segments():
+    return load_all_segments()
+
+
+def clear_db_cache():
+    """保存・編集・削除のあとに呼んで、履歴・地図を最新のデータにする"""
+    fetch_operations.clear()
+    fetch_all_segments.clear()
 
 
 # ── 釣果に応じた色・太さ（絶対値で5段階に固定）──────────────
@@ -135,16 +170,16 @@ with st.container():
             end_time = st.time_input("投入終了時刻", value=_parse_time(d.get("end_time"), time(4, 0)), step=60)
 
         st.markdown("---")
-        st.markdown("**CTD環境データ**")
+        st.markdown("**CTD環境データ**（計測していない項目は空欄のままでOK）")
         ec1, ec2, ec3 = st.columns(3)
         with ec1:
-            surface_temp = st.number_input("表層水温 (℃)", value=float(ctd.get("surface_temp") or 0.0), format="%.1f")
-            bottom_temp = st.number_input("底水温 (℃)", value=float(ctd.get("bottom_temp") or 0.0), format="%.1f")
+            surface_temp = st.number_input("表層水温 (℃)", value=_num_or_none(ctd.get("surface_temp")), format="%.1f", placeholder="未計測")
+            bottom_temp = st.number_input("底水温 (℃)", value=_num_or_none(ctd.get("bottom_temp")), format="%.1f", placeholder="未計測")
         with ec2:
-            surface_sal = st.number_input("表層塩分 (psu)", value=float(ctd.get("surface_salinity") or 0.0), format="%.2f")
-            bottom_sal = st.number_input("底層塩分 (psu)", value=float(ctd.get("bottom_salinity") or 0.0), format="%.2f")
+            surface_sal = st.number_input("表層塩分 (psu)", value=_num_or_none(ctd.get("surface_salinity")), format="%.2f", placeholder="未計測")
+            bottom_sal = st.number_input("底層塩分 (psu)", value=_num_or_none(ctd.get("bottom_salinity")), format="%.2f", placeholder="未計測")
         with ec3:
-            max_depth = st.number_input("実測最大水深 (m)", value=float(ctd.get("max_depth") or 0.0), format="%.1f")
+            max_depth = st.number_input("実測最大水深 (m)", value=_num_or_none(ctd.get("max_depth")), format="%.1f", placeholder="未計測")
 
         notes = st.text_area("備考", value=d.get("notes") or "", height=60)
         basic_submitted = st.form_submit_button("基本情報を保存", type="secondary")
@@ -192,9 +227,6 @@ with st.container():
             for _, row in edited_catch.iterrows()
         ]
 
-        # basic_formが未送信の場合は現在のd(OCRデータ)から引き継ぐ
-        save_date = op_date if basic_submitted or True else datetime.strptime(d.get("date", date.today().strftime("%Y-%m-%d")), "%Y-%m-%d").date()
-
         st.session_state.ocr_data = {
             "date": op_date.strftime("%Y-%m-%d"),
             "location": location,
@@ -212,6 +244,8 @@ with st.container():
             },
             "notes": notes,
         }
+        # 新しく確定し直したので「保存済み」フラグを外す（二重保存ガード用）
+        st.session_state.saved_op_id = None
         st.success("✅ 操業データを確定しました！STEP 2 に進んでください。")
 
     # 確定済みサマリー
@@ -252,29 +286,6 @@ else:
         gps_file = st.file_uploader("GPS ログ CSV をアップロード", type=["csv", "txt"], key="gps_csv")
 
         if gps_file:
-            # ── デバッグ：生CSVの列名と先頭3行を表示 ──
-            try:
-                raw_bytes = gps_file.read()
-                for enc in ("utf-8-sig", "utf-8", "shift_jis", "cp932"):
-                    try:
-                        raw_text = raw_bytes.decode(enc)
-                        break
-                    except Exception:
-                        continue
-                import io as _io
-                raw_df = pd.read_csv(_io.StringIO(raw_text), nrows=3)
-                with st.expander("🔍 デバッグ：生CSV（先頭3行）", expanded=True):
-                    st.write("列名:", list(raw_df.columns))
-                    st.write("先頭3行:")
-                    st.dataframe(raw_df.iloc[:, :6])
-                gps_file.seek(0)
-            except Exception as e:
-                st.warning(f"デバッグ表示エラー: {e}")
-                try:
-                    gps_file.seek(0)
-                except Exception:
-                    pass
-
             try:
                 gps_df = load_gps_csv(gps_file)
                 st.session_state.gps_df = gps_df
@@ -370,30 +381,6 @@ else:
             })
         st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
 
-        export_data = []
-        for seg in st.session_state.segments:
-            export_data.append({
-                "hachi_no": seg["hachi_no"],
-                "catch": seg["catch"],
-                "center_lat": seg["center_lat"],
-                "center_lon": seg["center_lon"],
-                "length_m": seg["length_m"],
-                "start_time": seg["start_time"].isoformat(),
-                "end_time": seg["end_time"].isoformat(),
-                "ctd": od.get("ctd"),
-            })
-        export_json = json.dumps(
-            {"operation": od, "segments": export_data},
-            ensure_ascii=False,
-            indent=2,
-        )
-        st.download_button(
-            "⬇️ 分割データをJSONでエクスポート",
-            data=export_json.encode("utf-8"),
-            file_name=f"operation_{od['date']}.json",
-            mime="application/json",
-        )
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 3: 地図可視化（Foliumヒートマップ）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -452,9 +439,9 @@ else:
           <b>📏 区間距離：</b>{round(seg['length_m'])} m<br>
           <b>⏱ 時刻：</b>{seg['start_time'].strftime('%H:%M')}〜{seg['end_time'].strftime('%H:%M')}<br>
           <hr style="margin:4px 0;">
-          <b>🌡 水温：</b>表層 {st_temp}℃ / 底 {bt_temp}℃（差 {temp_diff}℃）<br>
-          <b>🧂 塩分：</b>表層 {st_sal} psu / 底 {bt_sal} psu<br>
-          <b>🌊 水深：</b>{depth} m<br>
+          <b>🌡 水温：</b>表層 {_fmt(st_temp)}℃ / 底 {_fmt(bt_temp)}℃（差 {temp_diff}℃）<br>
+          <b>🧂 塩分：</b>表層 {_fmt(st_sal)} psu / 底 {_fmt(bt_sal)} psu<br>
+          <b>🌊 水深：</b>{_fmt(depth)} m<br>
         </div>
         """
 
@@ -518,17 +505,33 @@ if st.session_state.ocr_data and "error" not in st.session_state.ocr_data:
         if st.button("✏️ 編集を保存（上書き）", type="primary"):
             try:
                 update_operation(st.session_state.editing_op_id, od)
+                clear_db_cache()
                 st.success(f"✅ 操業ID {st.session_state.editing_op_id} を更新しました！")
+                # 更新済みデータなので保存済み扱いにする（下の新規保存ボタンでの二重登録を防ぐ）
+                st.session_state.saved_op_id = st.session_state.editing_op_id
                 st.session_state.editing_op_id = None
                 st.rerun()
             except Exception as e:
                 st.error(f"更新エラー: {e}")
+    elif st.session_state.saved_op_id is not None:
+        # ── 保存済み：二重保存を防ぐ ──
+        st.success(
+            f"✅ このデータは保存済みです（操業ID: {st.session_state.saved_op_id}）。"
+            "直したいときは下の履歴から「✏️ 編集する」を使ってください。"
+        )
     else:
         # ── 新規保存 ──
+        # 同じ操業日がすでにあれば一言注意する（保存は止めない）
+        same_date = [o for o in fetch_operations() if o["op_date"] == od.get("date")]
+        if same_date:
+            ids = "、".join(f"ID{o['id']}" for o in same_date)
+            st.warning(f"⚠️ この操業日（{od.get('date')}）は {ids} で保存済みです。二重保存になっていませんか？")
         if st.button("📥 このデータをDBに保存する", type="primary"):
             try:
                 segs = st.session_state.segments or []
                 op_id = save_operation(od, segs)
+                st.session_state.saved_op_id = op_id
+                clear_db_cache()
                 st.success(f"✅ 保存しました！（操業ID: {op_id}）")
                 st.rerun()
             except Exception as e:
@@ -541,7 +544,7 @@ st.markdown("---")
 # ── 過去の操業履歴 ───────────────────────────────────────
 st.subheader("📋 過去の操業履歴")
 
-ops = list_operations()
+ops = fetch_operations()
 
 if not ops:
     st.write("まだデータが保存されていません。")
@@ -579,6 +582,7 @@ else:
             st.session_state.segments  = loaded_segs
             st.session_state.total_hachi = int(loaded_ocr.get("total_hachi") or 1)
             st.session_state.editing_op_id = None
+            st.session_state.saved_op_id = selected_id  # すでにDBにある操業（二重保存防止）
             st.success("読み込みました！STEP 3 の地図が更新されます。")
             st.rerun()
 
@@ -603,6 +607,7 @@ else:
                 "segments": deleted_segs,
             }
             delete_operation(selected_id)
+            clear_db_cache()
             st.warning("削除しました。下の「↩️ 削除を取り消す」ですぐ戻せます。")
             st.rerun()
 
@@ -613,105 +618,37 @@ if st.session_state.get("last_deleted"):
     st.info(f"🗑️ 直前に削除した操業（元ID{ld['id']}・{ld['date']}）を復元できます。")
     if st.button("↩️ 削除を取り消す（復元する）", type="primary", use_container_width=True):
         new_id = save_operation(ld["ocr_data"], ld["segments"])
+        clear_db_cache()
         st.session_state.last_deleted = None
         st.success(f"復元しました！（新しいID{new_id}で保存し直しました）")
         st.rerun()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# STEP 5: 全操業の重ね地図（鉄板ポイント分析）
+# STEP 5: 全操業の分析（旧「重ね地図」と旧「水温で探す」を統合）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-st.header("STEP 5 　全操業の重ね地図（鉄板ポイント分析）")
-
-all_segs = load_all_segments()
-
-if not all_segs:
-    st.info("GPS付きで保存した操業がまだありません。STEP 1〜4で保存すると、ここに重ねて表示されます。")
-else:
-    # ── 日付フィルタ ──
-    all_dates = sorted({s["op_date"] for s in all_segs})
-    sel_dates = st.multiselect(
-        "表示する操業日を選択（未選択なら全部表示）",
-        options=all_dates,
-        default=all_dates,
-    )
-    if not sel_dates:
-        sel_dates = all_dates
-
-    view_segs = [s for s in all_segs if s["op_date"] in sel_dates]
-    st.caption(f"表示中：{len(sel_dates)} 日分 / 合計 {len(view_segs)} 鉢")
-
-    # ── 地図の中心 ──
-    lats = [s["center_lat"] for s in view_segs if s["center_lat"]]
-    lons = [s["center_lon"] for s in view_segs if s["center_lon"]]
-    center = [sum(lats) / len(lats), sum(lons) / len(lons)]
-
-    m5 = folium.Map(location=center, zoom_start=13, control_scale=True)
-    folium.TileLayer("OpenStreetMap", name="標準地図").add_to(m5)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri", name="衛星写真",
-    ).add_to(m5)
-    folium.TileLayer(
-        tiles="https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",
-        attr="OpenSeaMap", name="海図レイヤー", overlay=True,
-    ).add_to(m5)
-
-    # ── 全鉢を重ねて描画 ──
-    for s in view_segs:
-        try:
-            gps = json.loads(s["gps_points"]) if s["gps_points"] else []
-        except Exception:
-            gps = []
-        if len(gps) < 2:
-            continue
-        coords = [(p[0], p[1]) for p in gps]
-        color = catch_color(s["catch"])
-        weight = catch_weight(s["catch"])
-
-        popup_html = f"""
-        <div style="font-family:sans-serif; min-width:180px;">
-          <h4 style="margin:4px 0; color:{color};">{s['op_date']} 第{s['hachi_no']}鉢</h4>
-          <hr style="margin:4px 0;">
-          <b>🐟 釣果：</b>{s['catch']} 匹<br>
-          <b>📍 場所：</b>{s['location'] or '—'}<br>
-          <b>🌡 底水温：</b>{s['bottom_temp']}℃<br>
-          <b>🌊 最大水深：</b>{s['max_depth']} m<br>
-        </div>
-        """
-        folium.PolyLine(
-            locations=coords, color=color, weight=weight, opacity=0.75,
-            tooltip=f"{s['op_date']} 第{s['hachi_no']}鉢：{s['catch']}匹",
-            popup=folium.Popup(popup_html, max_width=260),
-        ).add_to(m5)
-
-    folium.LayerControl(collapsed=False).add_to(m5)
-    m5.get_root().html.add_child(folium.Element(CATCH_LEGEND_HTML))
-
-    st.caption("赤い線が重なる場所＝いつもよく釣れる鉄板ポイントです")
-    st_folium(m5, use_container_width=True, height=600, returned_objects=[])
-
-    # 「水深 × 釣果」の単独分析はリセット（削除）した。
-    # 理由: 水深だけでは釣果を説明できない（同じ場所でも釣れる日と釣れない日がある）。
-    #       水温など他の条件と運が混ざるため、水深単独の相関は誤った傾向を示す。
-    # 今後は「水温 × 水深」を組み合わせた分析（STEP 6で検討中）に置き換える。
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# STEP 6: 水温で探す（魚の群れの再現性ポイント分析）
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-st.header("STEP 6 　水温で探す 🌡🔍")
+st.header("STEP 5 　全操業の分析 🌡🔍（水温×場所で鉄板さがし）")
 st.caption(
     "日付ではなく「水温」で過去の実績をしぼり込みます。"
     "年によって海の進み方は違っても、同じ水温なら魚の群れは再現しやすい——"
     "という考え方です。来年のハモ漁で「今この水温なら、ここが狙い目」を見つけるための機能です。"
 )
 
-st6_segs = load_all_segments()
+st6_all = fetch_all_segments()
 
-if not st6_segs:
-    st.info("GPS付きで保存した操業がまだありません。STEP 1〜4で保存すると、ここで水温検索できます。")
+if not st6_all:
+    st.info("GPS付きで保存した操業がまだありません。STEP 1〜4で保存すると、ここで分析できます。")
 else:
+    # ── 日付で絞る（ふだんは全部のままでOK） ──
+    all_dates = sorted({s["op_date"] for s in st6_all})
+    sel_dates = st.multiselect(
+        "操業日で絞る（未選択なら全部）",
+        options=all_dates,
+        default=all_dates,
+    )
+    if not sel_dates:
+        sel_dates = all_dates
+    st6_segs = [s for s in st6_all if s["op_date"] in sel_dates]
     # ── 水温の種類を選ぶ（ふだんは底水温／レンタル機返却後は表層水温） ──
     temp_source = st.radio(
         "分析に使う水温",
@@ -800,8 +737,8 @@ else:
             else:
                 st.info("このレンジには10匹以上釣れた鉢がないため、ヒートマップは表示されません。")
 
-            # 鉢ごとの軌跡も色分けで重ねる（個別に見たいとき用）
-            track_group = folium.FeatureGroup(name="鉢ごとの軌跡", show=False)
+            # 鉢ごとの軌跡も色分けで重ねる（旧STEP5の重ね地図をここに統合）
+            track_group = folium.FeatureGroup(name="鉢ごとの軌跡", show=True)
             for s in sel:
                 try:
                     gps = json.loads(s["gps_points"]) if s["gps_points"] else []
@@ -842,20 +779,15 @@ else:
                 "水深はGEBCO（約450mメッシュ）から自動取得します。"
             )
 
-            if st.button("🌊 水深を取得して環境リストを作る", type="primary", key="depth_btn6"):
-                coords_all = tuple(
-                    (round(s["center_lat"], 4), round(s["center_lon"], 4))
-                    for s in has_temp
-                )
-                with st.spinner("海底水深データを取得中...（数秒）"):
-                    depths_all = get_depths(coords_all)
-                # 座標→水深 の対応表を作って退避（スライダーを動かしても再取得しない）
-                dmap = {}
-                for (la, lo_), d in zip(coords_all, depths_all):
-                    dmap[(la, lo_)] = d
-                st.session_state.temp_depth_map = dmap
-
-            dmap = st.session_state.get("temp_depth_map")
+            # 水深はGEBCOから自動取得する。結果は30日間キャッシュされるので、
+            # 待つのは初回だけ。全操業分をまとめて取るので、フィルタを変えても再取得しない。
+            coords_all = tuple(
+                (round(s["center_lat"], 4), round(s["center_lon"], 4))
+                for s in st6_all if s["center_lat"]
+            )
+            with st.spinner("海底水深データを取得中...（初回だけ数秒）"):
+                depths_all = get_depths(coords_all)
+            dmap = dict(zip(coords_all, depths_all))
             if dmap:
                 rows = []
                 for s in sel:
@@ -904,7 +836,7 @@ else:
             )
 
             if not dmap:
-                st.info("上の「🌊 水深を取得して環境リストを作る」ボタンを押すと、ここに早見表が出ます。")
+                st.warning("水深データを取得できなかったため、早見表を作れませんでした。")
             else:
                 grid_rows = []
                 for s in has_temp:

@@ -6,7 +6,6 @@ from datetime import datetime, date
 from io import StringIO
 
 import pandas as pd
-from dateutil import parser as dateutil_parser
 
 
 # よく使われるGPS CSVの列名パターン（自動検出用）
