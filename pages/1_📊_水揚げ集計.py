@@ -6,6 +6,7 @@ CSVの場所は Streamlit Secrets の MIZUAGE_CSV_URL にOneDrive共有リンク
 """
 import base64
 import io
+import re
 
 import altair as alt
 import pandas as pd
@@ -26,7 +27,16 @@ HAMO_SIZE_ORDER = ["小", "大", "大〇", "特大", "上り"]
 
 def _direct_url(share_url: str) -> str:
     """OneDriveの共有リンクを直接ダウンロード用URLに変換する"""
-    token = base64.urlsafe_b64encode(share_url.strip().encode()).decode().rstrip("=")
+    url = share_url.strip()
+    # 新形式リンク https://1drv.ms/x/c/<CID>/<共有トークン>?e=... に対応
+    # （SharePoint基盤へ移行済みのOneDrive個人アカウント用。動作確認済み）
+    m = re.match(r"https://1drv\.ms/[a-z]+/c/([0-9a-fA-F]+)/([A-Za-z0-9_\-!]+)", url)
+    if m:
+        cid, token = m.group(1), m.group(2)
+        return (f"https://my.microsoftpersonalcontent.com/personal/{cid}"
+                f"/_layouts/15/download.aspx?share={token}")
+    # 旧形式リンクは従来の shares API 変換
+    token = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
     return f"https://api.onedrive.com/v1.0/shares/u!{token}/root/content"
 
 
