@@ -19,12 +19,28 @@ from seabed import get_depths
 init_db()
 
 st.set_page_config(
-    page_title="延縄操業データ管理",
+    page_title="水薙丸ハモ縄分析ツール",
     page_icon="🎣",
     layout="wide",
 )
 
-st.title("🎣 延縄（ハモ）操業データ統合管理ツール")
+# ── 見出しサイズの調整 ─────────────────────────────────────
+# Streamlit標準の見出しはスマホだと大きすぎて圧迫感があるため、
+# 全体をひとまわり小さく、スマホ(640px以下)ではさらに一段小さくする。
+st.markdown("""
+<style>
+h1 { font-size: 1.6rem !important; }
+h2 { font-size: 1.25rem !important; }
+h3 { font-size: 1.05rem !important; }
+@media (max-width: 640px) {
+  h1 { font-size: 1.25rem !important; }
+  h2 { font-size: 1.05rem !important; }
+  h3 { font-size: 0.95rem !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🎣 水薙丸ハモ縄分析ツール")
 
 # ── セッション初期化 ──────────────────────────────────────────
 if "ocr_data" not in st.session_state:
