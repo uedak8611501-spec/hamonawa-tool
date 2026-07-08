@@ -21,8 +21,16 @@ st.set_page_config(
 
 st.title("📊 水揚げ集計（朝日水産 仕切票）")
 
-# ハモの品目（サイズ）の表示順
+# ハモの品目（サイズ）の表示順と色
+# 大・大〇が主力（単価が良い）ので濃く、小・特大は薄く、上り（最安値）は黒
 HAMO_SIZE_ORDER = ["小", "大", "大〇", "特大", "上り"]
+HAMO_SIZE_COLORS = [
+    "#b8d4ea",  # 小: 薄い水色
+    "#08519c",  # 大: 一番濃い青（主力）
+    "#3182bd",  # 大〇: 濃いめの青（二番手）
+    "#9ecae1",  # 特大: 薄めの水色
+    "#000000",  # 上り: 黒（単価最安）
+]
 
 
 def _direct_url(share_url: str) -> str:
@@ -150,7 +158,8 @@ if not hamo.empty:
             y=alt.Y("重量(kg):Q", title="水揚げ量 (kg)"),
             color=alt.Color("サイズ:N", title="サイズ",
                             sort=HAMO_SIZE_ORDER,
-                            scale=alt.Scale(scheme="blues")),
+                            scale=alt.Scale(domain=HAMO_SIZE_ORDER,
+                                            range=HAMO_SIZE_COLORS)),
             order=alt.Order("color_サイズ_sort_index:Q"),
             tooltip=[alt.Tooltip("日付:T", format="%m/%d"), "サイズ:N",
                      alt.Tooltip("重量(kg):Q", format=".1f")],
