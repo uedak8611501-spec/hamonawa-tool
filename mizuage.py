@@ -126,30 +126,15 @@ span_days = max((mizuage["日付"].max() - mizuage["日付"].min()).days + 1, 1)
 bar_size = max(5, min(30, int(550 / span_days * 0.7)))
 
 # ── 1. ハモのサイズ内訳（日別）──────────────────────────────
-st.subheader("ハモのサイズ内訳（日別）")
+# 平均サイズの折れ線を重ねられるようにするため、描画はセクション2の
+# 計算が終わったあとに行う。st.container()で表示場所だけ先に確保する
+# （画面上はこの位置＝サイズ内訳→平均サイズの順で表示される）。
+hamo_section = st.container()
+
 hamo = mizuage[mizuage["魚種"] == "ハモ"].copy()
 if not hamo.empty:
     hamo["サイズ"] = hamo["品目"].str.replace("ハモ", "", regex=False)
     hamo_daily = hamo.groupby(["日付", "サイズ"], as_index=False)["重量(kg)"].sum()
-    chart_hamo = (
-        alt.Chart(hamo_daily)
-        .mark_bar(size=bar_size, stroke="white", strokeWidth=1)
-        .encode(
-            x=alt.X("日付:T", title="", axis=alt.Axis(format="%m/%d")),
-            y=alt.Y("重量(kg):Q", title="水揚げ量 (kg)"),
-            color=alt.Color("サイズ:N", title="サイズ",
-                            sort=HAMO_SIZE_ORDER,
-                            scale=alt.Scale(domain=HAMO_SIZE_ORDER,
-                                            range=HAMO_SIZE_COLORS)),
-            order=alt.Order("color_サイズ_sort_index:Q"),
-            tooltip=[alt.Tooltip("日付:T", format="%m/%d"), "サイズ:N",
-                     alt.Tooltip("重量(kg):Q", format=".1f")],
-        )
-        .properties(height=320)
-    )
-    st.altair_chart(chart_hamo, use_container_width=True)
-else:
-    st.info("この期間はハモの水揚げがありません。")
 
 # ── 2. ハモの平均サイズ（日別）──────────────────────────────
 st.subheader("ハモの平均サイズ（日別）")
@@ -158,6 +143,8 @@ st.caption(
     "延縄記録の匹数には逃がした魚・逃げた魚など水揚げしない分も入っているため、"
     "下の「非水揚げ率」の分を匹数から差し引いてから計算します。"
 )
+
+avg_df = None  # サイズ内訳グラフへの重ね描き用（計算できた場合のみDataFrameが入る）
 
 if not hamo.empty:
     loss_pct = st.slider(
@@ -219,6 +206,63 @@ if not hamo.empty:
                     use_container_width=True, hide_index=True,
                 )
             st.caption("※操業日と仕切票の日付が同じ日だけを突き合わせています。")
+
+# ── 1の描画（平均サイズ計算後に、確保しておいた場所へ描く）──
+with hamo_section:
+    st.subheader("ハモのサイズ内訳（日別）")
+    if hamo.empty:
+        st.info("この期間はハモの水揚げがありません。")
+    else:
+        bars = (
+            alt.Chart(hamo_daily)
+            .mark_bar(size=bar_size, stroke="white", strokeWidth=1)
+            .encode(
+                x=alt.X("日付:T", title="", axis=alt.Axis(format="%m/%d")),
+                y=alt.Y("重量(kg):Q", title="水揚げ量 (kg)"),
+                color=alt.Color("サイズ:N", title="サイズ",
+                                sort=HAMO_SIZE_ORDER,
+                                scale=alt.Scale(domain=HAMO_SIZE_ORDER,
+                                                range=HAMO_SIZE_COLORS)),
+                order=alt.Order("color_サイズ_sort_index:Q"),
+                tooltip=[alt.Tooltip("日付:T", format="%m/%d"), "サイズ:N",
+                         alt.Tooltip("重量(kg):Q", format=".1f")],
+            )
+        )
+
+        can_overlay = avg_df is not None and len(avg_df) > 0
+        overlay_on = st.toggle(
+            "📈 平均サイズ(kg/匹)の折れ線を重ねる",
+            value=True,
+            disabled=not can_overlay,
+            help="緑の折れ線。目盛りはグラフの右側の軸です。非水揚げ率は下のスライダーで調整できます。",
+        )
+
+        if overlay_on and can_overlay:
+            line = (
+                alt.Chart(avg_df)
+                .mark_line(point=alt.OverlayMarkDef(size=70, filled=True),
+                           strokeWidth=2.5, color="#1a7f37")
+                .encode(
+                    x=alt.X("日付:T"),
+                    y=alt.Y("平均サイズ(kg/匹):Q", title="平均サイズ (kg/匹)",
+                            axis=alt.Axis(orient="right", titleColor="#1a7f37",
+                                          labelColor="#1a7f37"),
+                            scale=alt.Scale(zero=False)),
+                    tooltip=[
+                        alt.Tooltip("日付:T", format="%m/%d"),
+                        alt.Tooltip("平均サイズ(kg/匹):Q", format=".2f"),
+                        alt.Tooltip("水揚げ匹数(補正後):Q", format=".1f"),
+                    ],
+                )
+            )
+            # 棒(左軸=kg)と折れ線(右軸=kg/匹)はケタが違うので目盛りを別々にする
+            chart1 = alt.layer(bars, line).resolve_scale(y="independent").properties(height=320)
+        else:
+            chart1 = bars.properties(height=320)
+            if not can_overlay:
+                st.caption("（延縄記録と日付が合う日がまだ無いため、折れ線は表示できません）")
+
+        st.altair_chart(chart1, use_container_width=True)
 
 # ── 3. 月別まとめ（水揚げ・餌代）────────────────────────────
 st.subheader("月別まとめ")
