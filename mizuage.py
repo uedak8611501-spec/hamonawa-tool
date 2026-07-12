@@ -18,13 +18,14 @@ import streamlit as st
 st.title("📊 水揚げ集計（朝日水産 仕切票）")
 
 # ハモの品目（サイズ）の表示順と色
-# 大・大〇が主力（単価が良い）ので濃く、小・特大は薄く、上り（最安値）は黒
-HAMO_SIZE_ORDER = ["小", "大", "大〇", "特大", "上り"]
+# 主力の大・大〇は強調色（濃い青・濃いオレンジ）、特大・小は薄色、上り（最安値）は黒。
+# 青⇔オレンジの組み合わせは色の見え方が異なる人にも区別しやすい。
+HAMO_SIZE_ORDER = ["大", "大〇", "特大", "小", "上り"]
 HAMO_SIZE_COLORS = [
-    "#b8d4ea",  # 小: 薄い水色
-    "#08519c",  # 大: 一番濃い青（主力）
-    "#3182bd",  # 大〇: 濃いめの青（二番手）
-    "#9ecae1",  # 特大: 薄めの水色
+    "#08519c",  # 大: 濃い青（主力・強調）
+    "#d95f02",  # 大〇: 濃いオレンジ（主力・強調）
+    "#9ecae1",  # 特大: 薄い水色
+    "#fdd0a2",  # 小: 薄いオレンジ
     "#000000",  # 上り: 黒（単価最安）
 ]
 
@@ -122,25 +123,7 @@ if st.button("🔄 最新データに更新"):
 span_days = max((mizuage["日付"].max() - mizuage["日付"].min()).days + 1, 1)
 bar_size = max(5, min(30, int(550 / span_days * 0.7)))
 
-# ── 1. 日別の水揚げ量（魚種で色分け）─────────────────────────
-st.subheader("日別の水揚げ量（魚種別）")
-daily = (mizuage.groupby(["日付", "魚種"], as_index=False)["重量(kg)"].sum())
-chart_daily = (
-    alt.Chart(daily)
-    .mark_bar(size=bar_size)
-    .encode(
-        x=alt.X("日付:T", title="", axis=alt.Axis(format="%m/%d")),
-        y=alt.Y("重量(kg):Q", title="水揚げ量 (kg)"),
-        color=alt.Color("魚種:N", title="魚種",
-                        scale=alt.Scale(scheme="tableau10")),
-        tooltip=[alt.Tooltip("日付:T", format="%m/%d"), "魚種:N",
-                 alt.Tooltip("重量(kg):Q", format=".1f")],
-    )
-    .properties(height=320)
-)
-st.altair_chart(chart_daily, use_container_width=True)
-
-# ── 2. ハモのサイズ内訳（日別）──────────────────────────────
+# ── 1. ハモのサイズ内訳（日別）──────────────────────────────
 st.subheader("ハモのサイズ内訳（日別）")
 hamo = mizuage[mizuage["魚種"] == "ハモ"].copy()
 if not hamo.empty:
@@ -148,7 +131,7 @@ if not hamo.empty:
     hamo_daily = hamo.groupby(["日付", "サイズ"], as_index=False)["重量(kg)"].sum()
     chart_hamo = (
         alt.Chart(hamo_daily)
-        .mark_bar(size=bar_size)
+        .mark_bar(size=bar_size, stroke="white", strokeWidth=1)
         .encode(
             x=alt.X("日付:T", title="", axis=alt.Axis(format="%m/%d")),
             y=alt.Y("重量(kg):Q", title="水揚げ量 (kg)"),
@@ -166,7 +149,7 @@ if not hamo.empty:
 else:
     st.info("この期間はハモの水揚げがありません。")
 
-# ── 3. 月別まとめ（水揚げ・餌代）────────────────────────────
+# ── 2. 月別まとめ（水揚げ・餌代）────────────────────────────
 st.subheader("月別まとめ")
 m = mizuage.copy()
 m["月"] = m["日付"].dt.strftime("%Y-%m")
