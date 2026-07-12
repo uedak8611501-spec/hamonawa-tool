@@ -13,6 +13,8 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from common import fetch_operations
+
 # ページ設定は app.py（エントリポイント）で一括して行う
 
 st.title("📊 水揚げ集計（朝日水産 仕切票）")
@@ -149,7 +151,76 @@ if not hamo.empty:
 else:
     st.info("この期間はハモの水揚げがありません。")
 
-# ── 2. 月別まとめ（水揚げ・餌代）────────────────────────────
+# ── 2. ハモの平均サイズ（日別）──────────────────────────────
+st.subheader("ハモの平均サイズ（日別）")
+st.caption(
+    "水揚げ重量 ÷ 匹数 で「1匹あたり何kgか」を出します。"
+    "延縄記録の匹数には逃がした魚・逃げた魚など水揚げしない分も入っているため、"
+    "下の「非水揚げ率」の分を匹数から差し引いてから計算します。"
+)
+
+if not hamo.empty:
+    loss_pct = st.slider(
+        "非水揚げ率（釣った匹数のうち、水揚げに含まれない割合）",
+        min_value=0, max_value=30, value=10, step=1, format="%d%%",
+    )
+
+    ops = fetch_operations()
+    cnt_df = pd.DataFrame([
+        {"日付": pd.to_datetime(o["op_date"]), "釣った匹数": o["total_catch"]}
+        for o in ops if o.get("total_catch")
+    ])
+
+    if cnt_df.empty:
+        st.info("延縄記録にまだ操業データがないため、平均サイズを計算できません。")
+    else:
+        w_daily = hamo.groupby("日付", as_index=False)["重量(kg)"].sum()
+        avg_df = w_daily.merge(cnt_df, on="日付", how="inner")
+        avg_df["水揚げ匹数(補正後)"] = (avg_df["釣った匹数"] * (1 - loss_pct / 100)).round(1)
+        avg_df = avg_df[avg_df["水揚げ匹数(補正後)"] > 0]
+
+        if avg_df.empty:
+            st.info(
+                "水揚げ（仕切票）と延縄記録の両方がそろった日がまだありません。"
+                "※同じ日付どうしを突き合わせて計算します。"
+            )
+        else:
+            avg_df["平均サイズ(kg/匹)"] = (
+                avg_df["重量(kg)"] / avg_df["水揚げ匹数(補正後)"]
+            ).round(2)
+
+            chart_avg = (
+                alt.Chart(avg_df)
+                .mark_line(point=alt.OverlayMarkDef(size=80, filled=True),
+                           strokeWidth=2, color="#08519c")
+                .encode(
+                    x=alt.X("日付:T", title="", axis=alt.Axis(format="%m/%d")),
+                    y=alt.Y("平均サイズ(kg/匹):Q", title="平均サイズ (kg/匹)",
+                            scale=alt.Scale(zero=False)),
+                    tooltip=[
+                        alt.Tooltip("日付:T", format="%m/%d"),
+                        alt.Tooltip("平均サイズ(kg/匹):Q", format=".2f"),
+                        alt.Tooltip("重量(kg):Q", format=".1f"),
+                        "釣った匹数:Q",
+                        alt.Tooltip("水揚げ匹数(補正後):Q", format=".1f"),
+                    ],
+                )
+                .properties(height=280)
+            )
+            st.altair_chart(chart_avg, use_container_width=True)
+
+            # 期間全体の平均（日ごとの平均の平均ではなく、総重量÷総匹数で出す）
+            overall = avg_df["重量(kg)"].sum() / avg_df["水揚げ匹数(補正後)"].sum()
+            st.metric("期間全体の平均サイズ", f"{overall:.2f} kg/匹")
+
+            with st.expander("日ごとの数字を見る"):
+                st.dataframe(
+                    avg_df[["日付", "重量(kg)", "釣った匹数", "水揚げ匹数(補正後)", "平均サイズ(kg/匹)"]],
+                    use_container_width=True, hide_index=True,
+                )
+            st.caption("※操業日と仕切票の日付が同じ日だけを突き合わせています。")
+
+# ── 3. 月別まとめ（水揚げ・餌代）────────────────────────────
 st.subheader("月別まとめ")
 m = mizuage.copy()
 m["月"] = m["日付"].dt.strftime("%Y-%m")
